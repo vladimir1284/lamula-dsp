@@ -1,110 +1,108 @@
 # **LAMULA RCP — Project Plan**
 
-### **Project:** LAMULA RCP — Radar Control Processor & Operator MMI (successor to Ravis 1.3 \+ RCP \+ Rainbow) **Goal:** Bring a Gematronik weather radar back to operational life with a fully in-house software stack, with no Gematronik dependency. The RCP controls the radar, ingests pre-computed moments from the DSP/DRX, archives the **volumetric observation** as NEXRAD **Level-II**, and feeds that base data to **ORPG** through a complete WSR-88D **RDA emulation**; all meteorological product generation is delegated to ORPG. **Duration:** 8 months (34 weeks) **Team:** 6 (4 software engineers \+ 2 product/domain experts acting as QA) **Delivery model:** AI-agent-accelerated, spec-and-test-driven development **Month-8 success criterion:** the complete system validated end-to-end against in-house simulators (and against a real or stubbed ORPG over the RDA interface); field commissioning against real hardware follows after month 8\.
+**Project:** LAMULA RCP — Radar Control Processor & Operator MMI (successor to Ravis 1.3 \+ RCP \+ Rainbow) **Goal:** Bring a Gematronik weather radar back to operational life with a fully in-house software stack, with no Gematronik dependency. The RCP controls the radar, ingests pre-computed moments from the DSP/DRX, archives the **volumetric observation** as NEXRAD **Level-II**, and feeds that base data to **ORPG** through a complete WSR-88D **RDA emulation**; all meteorological product generation is delegated to ORPG. **Duration:** 8 months (34 weeks) **Team:** 6 (4 software engineers \+ 2 product/domain experts acting as QA) **Delivery model:** AI-agent-accelerated, spec-and-test-driven development **Month-8 success criterion:** the complete system validated end-to-end against in-house simulators (and against a real or stubbed ORPG over the RDA interface); field commissioning against real hardware follows after month 8\.
 
-### ---
+---
 
 ## **Revision note (this update)**
 
-### This revision incorporates four decisions taken after the first draft. They are listed here so the change is auditable; the rest of the document reflects them throughout.
+This revision incorporates four decisions taken after the first draft. They are listed here so the change is auditable; the rest of the document reflects them throughout.
 
-1. ### **The ORPG feed moves from the DSP to the RCP.** Rationale: the RCP is the node that manages the archiving of observations, and the DSP is headless (no GUI). The DSP now only delivers moments to the RCP; the RCP archives them and feeds ORPG. *Cross-project consequence:* the LAMULA DSP plan must be updated to remove its `DSP ↔ ORPG` contract and the ORPG output encoders — that responsibility now lives here.
+1. **The ORPG feed moves from the DSP to the RCP.** Rationale: the RCP is the node that manages the archiving of observations, and the DSP is headless (no GUI). The DSP now only delivers moments to the RCP; the RCP archives them and feeds ORPG. *Cross-project consequence:* the LAMULA DSP plan must be updated to remove its `DSP ↔ ORPG` contract and the ORPG output encoders — that responsibility now lives here.
 
-2. ### **The RCP ↔ DSP link is 1 GbE.** Outside the FPGA, 1 Gb Ethernet is sufficient; the high-rate path (ADC/DDC/decimation and the 10GbE inside the DRX) stays internal to the FPGA/DRX and is out of scope for the RCP.
+2. **The RCP ↔ DSP link is 1 GbE.** Outside the FPGA, 1 Gb Ethernet is sufficient; the high-rate path (ADC/DDC/decimation and the 10GbE inside the DRX) stays internal to the FPGA/DRX and is out of scope for the RCP.
 
-3. ### **The RCP archives only the volumetric observation** (base data: Z/V/W \+ dual-pol, by volume) — **not** derived products. The **primary archive/output format is NEXRAD Level-II.** Product generation is ORPG's responsibility.
+3. **The RCP archives only the volumetric observation** (base data: Z/V/W \+ dual-pol, by volume) — **not** derived products. The **primary archive/output format is NEXRAD Level-II.** Product generation is ORPG's responsibility.
 
-4. ### **The RDA emulation is implemented in full.** The system depends 100% on ORPG for product generation, so the RCP↔ORPG (WSR-88D RDA, ICD 2620002\) interface is a complete, critical-path, Stage-1 deliverable — not a partial encoder.
+4. **The RDA emulation is implemented in full.** The system depends 100% on ORPG for product generation, so the RCP↔ORPG (WSR-88D RDA, ICD 2620002\) interface is a complete, critical-path, Stage-1 deliverable — not a partial encoder.
 
-### ---
+---
 
 ## **1\. Executive Summary**
 
-### LAMULA RCP is a clean-sheet design and build of the radar control software stack: the Radar Control Processor (RCP) control logic and hardware routines, automated scan scheduling, archiving of the volumetric observation, the ORPG feed (RDA emulation), the LAMULA RCP web-based operator MMI (which reproduces the operationally relevant behaviour of Ravis), and a hardware-faithful radar simulator.
+LAMULA RCP is a clean-sheet design and build of the radar control software stack: the Radar Control Processor (RCP) control logic and hardware routines, automated scan scheduling, archiving of the volumetric observation, the ORPG feed (RDA emulation), the LAMULA RCP web-based operator MMI (which reproduces the operationally relevant behaviour of Ravis), and a hardware-faithful radar simulator.
 
-### Because we control the entire interface, we discard the legacy RCL protocol and the legacy four-level control-mode arbitration. The system targets a single radar model, a single operator on a control-room laptop (a thin browser client), and runs on a private, air-gapped operational network — which removes the entire security-hardening workstream.
+Because we control the entire interface, we discard the legacy RCL protocol and the legacy four-level control-mode arbitration. The system targets a single radar model, a single operator on a control-room laptop (a thin browser client), and runs on a private, air-gapped operational network — which removes the entire security-hardening workstream.
 
-### The RCP does **not** generate meteorological products. It receives pre-computed moments from the DSP (the "DRX"), persists the volumetric observation as NEXRAD Level-II, and streams that base data by radial to ORPG, which performs all product generation. This makes the `RCP ↔ ORPG` interface (a complete WSR-88D RDA emulation per ICD 2620002\) mission-critical: with no in-house product path, the system depends 100% on ORPG.
+The RCP does **not** generate meteorological products. It receives pre-computed moments from the DSP (the "DRX"), persists the volumetric observation as NEXRAD Level-II, and streams that base data by radial to ORPG, which performs all product generation. This makes the `RCP ↔ ORPG` interface (a complete WSR-88D RDA emulation per ICD 2620002\) mission-critical: with no in-house product path, the system depends 100% on ORPG.
 
-### The architecture's central principle is a Hardware Abstraction Layer (HAL) with two interchangeable implementations behind one interface: a real-hardware adapter (Modbus/Profibus via an SBC) and a simulator adapter. The whole stack runs identically against either, which is exactly what makes "validate on simulators now, commission on hardware later" a sound delivery strategy and what keeps the control laptop trivially replaceable.
+The architecture's central principle is a Hardware Abstraction Layer (HAL) with two interchangeable implementations behind one interface: a real-hardware adapter (Modbus/Profibus via an SBC) and a simulator adapter. The whole stack runs identically against either, which is exactly what makes "validate on simulators now, commission on hardware later" a sound delivery strategy and what keeps the control laptop trivially replaceable.
 
-### The plan is structured around four milestones (M1–M4) over five phases, sized for a 6-person AI-accelerated team. The two largest residual risks are **simulator fidelity** (the acceptance gate is simulator-based, so the system is only as validated as the simulator is faithful) and the **100% dependency on the external ORPG** for product generation. Both are owned by the two product experts and managed explicitly throughout.
+The plan is structured around four milestones (M1–M4) over five phases, sized for a 6-person AI-accelerated team. The two largest residual risks are **simulator fidelity** (the acceptance gate is simulator-based, so the system is only as validated as the simulator is faithful) and the **100% dependency on the external ORPG** for product generation. Both are owned by the two product experts and managed explicitly throughout.
 
 ## **2\. Context & Objectives**
 
-### The radar hardware (transmitter, analog receiver, antenna/servo and associated sensors and actuators) exists and is well understood by the team. The objective is to replace all proprietary Gematronik control software with an independent stack, so the radar can be operated, scanned, archived and delivered to ORPG without the original vendor.
+The radar hardware (transmitter, analog receiver, antenna/servo and associated sensors and actuators) exists and is well understood by the team. The objective is to replace all proprietary Gematronik control software with an independent stack, so the radar can be operated, scanned, archived and delivered to ORPG without the original vendor.
 
-### Objectives, in priority order:
+Objectives, in priority order:
 
-1. ### Reliably and safely power up and control the radar (the six control routines) through a clean hardware interface.
+1. Reliably and safely power up and control the radar (the six control routines) through a clean hardware interface.
 
-2. ### Execute manual and automated volume scans.
+2. Execute manual and automated volume scans.
 
-3. ### Ingest pre-computed moments from the DSP/DRX (over 1 GbE) and present them as live PPI / RHI / ASCOPE displays with full color management.
+3. Ingest pre-computed moments from the DSP/DRX (over 1 GbE) and present them as live PPI / RHI / ASCOPE displays with full color management.
 
-4. ### Archive the acquired **volumetric observation** as NEXRAD Level-II.
+4. Archive the acquired **volumetric observation** as NEXRAD Level-II.
 
-5. ### Feed that base data to ORPG by radial, in real time, through a complete WSR-88D RDA emulation; ORPG generates all products.
+5. Feed that base data to ORPG by radial, in real time, through a complete WSR-88D RDA emulation; ORPG generates all products.
 
-6. ### Provide a single-operator web MMI reproducing the operationally relevant Ravis feature set.
+6. Provide a single-operator web MMI reproducing the operationally relevant Ravis feature set.
 
-7. ### Provide a simulator faithful enough to serve as the validation and acceptance platform.
+7. Provide a simulator faithful enough to serve as the validation and acceptance platform.
 
 ## **3\. Scope**
 
 ### **3.1 In scope (Stage 1 — this project)**
 
-* ### Hardware Abstraction Layer (HAL) with real-hardware (Modbus/Profibus over SBC) and simulator adapters behind one interface.
+* Hardware Abstraction Layer (HAL) with real-hardware (Modbus/Profibus over SBC) and simulator adapters behind one interface.
 
-* ### Radar simulator: emulates sensors/actuators at the HAL boundary and emulates the DSP/DRX moment stream, with fault injection for BITE testing.
+* Radar simulator: emulates sensors/actuators at the HAL boundary and emulates the DSP/DRX moment stream, with fault injection for BITE testing.
 
-* ### Control routines: general radar power-on, transmitter power-on, analog-receiver power-on, antenna-unit power-on, antenna movement, antenna positioning.
+* Control routines: general radar power-on, transmitter power-on, analog-receiver power-on, antenna-unit power-on, antenna movement, antenna positioning.
 
-* ### Parameter-safety guard (low-responsibility, complementing hardware interlocks): antenna limit checks and prevention of pulse-width × PRF combinations that would damage the klystron/magnetron.
+* Parameter-safety guard (low-responsibility, complementing hardware interlocks): antenna limit checks and prevention of pulse-width × PRF combinations that would damage the klystron/magnetron.
 
-* ### Scan controller \+ scheduler: interactive scans (Scan Worksheet equivalent) and automated volume scans (Stage-1 must-have).
+* Scan controller \+ scheduler: interactive scans (Scan Worksheet equivalent) and automated volume scans (Stage-1 must-have).
 
-* ### DSP/DRX moment ingestion: subscribe to and route pre-computed moments (UZ, CZ, ZDR, V, W, I, Q) from the external DSP **over a 1 GbE link**.
+* DSP/DRX moment ingestion: subscribe to and route pre-computed moments (UZ, CZ, ZDR, V, W, I, Q) from the external DSP **over a 1 GbE link**.
 
-* ### **Archive (salva):** persistence of the **volumetric observation** as **NEXRAD Level-II (primary format)**, plus scan, status and event metadata. No derived products are archived.
+* **Archive (salva):** persistence of the **volumetric observation** as **NEXRAD Level-II (primary format)**, plus scan, status and event metadata. No derived products are archived.
 
-* ### **ORPG interface — complete WSR-88D RDA emulation (ICD 2620002):** Message 31 / Message 1 base-data framing; CTM and MSG headers; the RDA state machine (Standby / Startup / Operate / Offline-Operate); periodic RDA status (Message 2); loopback test (Messages 11/12); RDA control-command processing from ORPG (Message 6, including VCP change, transmission enable/disable, calibration control); clutter filter map and bypass map (Messages 15/13); VCP definitions; TCP server with login. Real-time **by-radial Level-II** stream to ORPG. (RDABackendPy is the reference implementation.)
+* **ORPG interface — complete WSR-88D RDA emulation (ICD 2620002):** Message 31 / Message 1 base-data framing; CTM and MSG headers; the RDA state machine (Standby / Startup / Operate / Offline-Operate); periodic RDA status (Message 2); loopback test (Messages 11/12); RDA control-command processing from ORPG (Message 6, including VCP change, transmission enable/disable, calibration control); clutter filter map and bypass map (Messages 15/13); VCP definitions; TCP server with login. Real-time **by-radial Level-II** stream to ORPG. (RDABackendPy is the reference implementation.)
 
-* ### Gateway: REST \+ WebSocket API (FastAPI) co-located on the backend server.
+* Gateway: REST \+ WebSocket API (FastAPI) co-located on the backend server.
 
-* ### LAMULA RCP web MMI (Vue 3): Control Center, passive/active toggle, System Visualization with live subsystem status, Antenna Control, Scan Worksheet, DRX/RSP control & calibration views, PPI / RHI / ASCOPE data views with 256-level color management, BITE message window, System Information window, and an ORPG-link status view.
+* LAMULA RCP web MMI (Vue 3): Control Center, passive/active toggle, System Visualization with live subsystem status, Antenna Control, Scan Worksheet, DRX/RSP control & calibration views, PPI / RHI / ASCOPE data views with 256-level color management, BITE message window, System Information window, and an ORPG-link status view.
 
-* ### Calibration (Stage 1): single-point calibration and TX power/adjustment workflows.
+* Calibration (Stage 1): single-point calibration and TX power/adjustment workflows.
 
-* ### Packaging: offline, air-gapped installer for the server; thin browser client.
+* Packaging: offline, air-gapped installer for the server; thin browser client.
 
 ### **3.2 Out of scope**
 
-* ### Hardware re-engineering / reverse-engineering of the radar and replacement of proprietary devices with general-purpose ones — handled by the team outside this project; we assume full knowledge of and access to the hardware interface.
+* Hardware re-engineering / reverse-engineering of the radar and replacement of proprietary devices with general-purpose ones — handled by the team outside this project; we assume full knowledge of and access to the hardware interface.
 
-* ### DSP signal processing (I/Q → moments) — a separate component/project; we consume pre-computed moments.
+* DSP signal processing (I/Q → moments) — a separate component/project; we consume pre-computed moments.
 
-* ### **Product generation** — performed entirely by **ORPG** (the separate LAMULA ORPG project); the RCP only delivers base data to it.
+* **Product generation** — performed entirely by **ORPG** (the separate LAMULA ORPG project); the RCP only delivers base data to it.
 
-* ### The high-rate acquisition path (ADC/DDC/decimation, 10GbE) — internal to the FPGA/DRX; the RCP only sees the 1 GbE moment stream.
+* The high-rate acquisition path (ADC/DDC/decimation, 10GbE) — internal to the FPGA/DRX; the RCP only sees the 1 GbE moment stream.
 
-* ### Field commissioning on real hardware — occurs after month 8; this project delivers a system validated on simulators (and against ORPG over the RDA interface) and commissioning-ready.
+* Field commissioning on real hardware — occurs after month 8; this project delivers a system validated on simulators (and against ORPG over the RDA interface) and commissioning-ready.
 
-* ### Security hardening / authentication / multi-tenant access control — air-gapped private network, single operator.
+* Security hardening / authentication / multi-tenant access control — air-gapped private network, single operator.
 
 ### **3.3 Stage 2 / deferred (documented, not built now)**
 
-### Additional output/distribution formats beyond Level-II — **MDV by-volume to NCAR TITAN**, and **NETCDF / HDF5** for research/archive; concurrent multi-destination distribution engine; Sun Position / Sun Track auto-alignment; email/notification messaging; an RCL-console-equivalent low-level maintenance terminal; geographic overlays and location-out-of-center; RX linearity validation, power monitor, signal-generator and ITSG control modules; multi-radar / heterogeneous support; multi-operator concurrency and control-authority arbitration; remote IoT access (HTTPS/VPN) and role-based access control.
+Additional output/distribution formats beyond Level-II — **MDV by-volume to NCAR TITAN**, and **NETCDF / HDF5** for research/archive; concurrent multi-destination distribution engine; Sun Position / Sun Track auto-alignment; email/notification messaging; an RCL-console-equivalent low-level maintenance terminal; geographic overlays and location-out-of-center; RX linearity validation, power monitor, signal-generator and ITSG control modules; multi-radar / heterogeneous support; multi-operator concurrency and control-authority arbitration; remote IoT access (HTTPS/VPN) and role-based access control.
 
 ## **4\. System Architecture**
 
 ### **4.1 Overview**
 
-### A single server on the operational network hosts the entire backend, the gateway and the RDA emulation. The control-room laptop runs only a browser pointed at that server, so replacing the laptop has no operational impact. The backend is layered; every layer above the HAL is agnostic to whether it is driving real steel or the simulator.
+A single server on the operational network hosts the entire backend, the gateway and the RDA emulation. The control-room laptop runs only a browser pointed at that server, so replacing the laptop has no operational impact. The backend is layered; every layer above the HAL is agnostic to whether it is driving real steel or the simulator.
 
-### Data flow: the **DSP/DRX** is an external moment source the RCP subscribes to **over 1 GbE**; the RCP fans each ray out to the live displays, to the Level-II archive, and to the **ORPG interface**, which presents the RCP to ORPG as a WSR-88D RDA and streams base data by radial. **ORPG** is the downstream product generator. The simulator emulates the DSP/DRX during development and validation; ORPG (real open-source build, or a CM\_TCP stub) closes the loop on the other side.
-
-### 
+Data flow: the **DSP/DRX** is an external moment source the RCP subscribes to **over 1 GbE**; the RCP fans each ray out to the live displays, to the Level-II archive, and to the **ORPG interface**, which presents the RCP to ORPG as a WSR-88D RDA and streams base data by radial. **ORPG** is the downstream product generator. The simulator emulates the DSP/DRX during development and validation; ORPG (real open-source build, or a CM\_TCP stub) closes the loop on the other side.
 
 
 ### **4.3 Key design principles**
