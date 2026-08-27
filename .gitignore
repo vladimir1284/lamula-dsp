@@ -1,0 +1,12 @@
+# Source manuals (vendor copyright — reference only, never commit)
+ravis_manual_md.zip
+rvp900_manual_md.zip
+ravis/
+rvp900/
+
+# mkdocs / wrangler build artifacts
+site/
+.wrangler/
+
+# secrets
+.env

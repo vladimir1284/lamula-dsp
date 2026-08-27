@@ -1,0 +1,51 @@
+site_name: LAMULA-DSP
+site_description: Reemplazo integral del stack de procesamiento y control de radar Vesta — DRx (FPGA) + DSP (Rust) + RCP (control MMI)
+repo_url: https://github.com/vladimir1284/lamula-dsp
+repo_name: vladimir1284/lamula-dsp
+
+theme:
+  name: material
+  language: es
+  palette:
+    - media: '(prefers-color-scheme: light)'
+      scheme: default
+      primary: deep purple
+      toggle:
+        icon: material/weather-night
+        name: Modo oscuro
+    - media: '(prefers-color-scheme: dark)'
+      scheme: slate
+      primary: deep purple
+      toggle:
+        icon: material/weather-sunny
+        name: Modo claro
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - tables
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight
+  - toc:
+      permalink: true
+
+nav:
+  - Inicio: index.md
+  - Project Plans:
+      - LAMULA DRx: drx-plan.md
+      - LAMULA DSP: dsp-plan.md
+      - LAMULA RCP: rcp-plan.md
+  - Algoritmos de procesamiento:
+      - Overview: algorithms/index.md
+      - Pulse-pair / momentos: algorithms/pulse-pair-moments.md
+      - GMAP (filtrado de clutter): algorithms/gmap-clutter-filtering.md
+      - Dual-PRF dealiasing: algorithms/dual-prf-dealiasing.md
+      - SZ second-trip recovery: algorithms/sz-second-trip-recovery.md
+      - Calibración de reflectividad: algorithms/reflectivity-calibration.md
