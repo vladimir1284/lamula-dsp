@@ -75,7 +75,7 @@ Objectives, in priority order:
 
 ### **3.3 Stage 2 / deferred (documented, not built now)**
 
-CPU-architecture-specific GPU/accelerator offload; multi-radar / heterogeneous radar support; advanced calibration (RX linearity, power monitor, signal-generator/ITSG-driven workflows); on-box long-term moment archiving (beyond raw-I/Q research dumps); adaptive clutter-map learning. *(Output/distribution formats beyond the RCP feed — NETCDF/HDF5, MDV-by-volume to TITAN, additional custom formats — now belong to the RCP's distribution layer, not the DSP.)*
+CPU-architecture-specific GPU/accelerator offload; multi-radar / heterogeneous radar support; advanced calibration (RX linearity, power monitor, signal-generator/ITSG-driven workflows); on-box long-term moment archiving (beyond raw-I/Q research dumps); adaptive clutter-map learning; a **remote raw-I/Q archive host** — decoupling archive storage from the DSP process itself (network export/import of time-series data to a separate box), rather than the Stage-1 assumption of a single-box, offline-friendly archive. *(Output/distribution formats beyond the RCP feed — NETCDF/HDF5, MDV-by-volume to TITAN, additional custom formats — now belong to the RCP's distribution layer, not the DSP.)*
 
 ## **4\. System Architecture**
 
@@ -157,6 +157,17 @@ Two contracts are designed up front and frozen early, because every workstream �
 * **DSP ↔ RCP.** Bidirectional and owned by this project: control/config (filters, thresholds, dealiasing, scan mode, calibration constants), status/health and BITE events, the **full moment stream** (the authoritative volumetric observation — all moments, all bins, per radial with metadata, at full precision), and the IF spectrum-analyzer feed, over **1GbE**. Typed from a single schema, with bindings mirrored to the RCP's Python/TypeScript side. The RCP archives this stream as NEXRAD Level-II and feeds ORPG; resolution decimation (8-/16-bit) is the RCP's concern. This is the contract the RCP plan calls `RCP ↔ DRX/DSP`.
 
 *Removed:* the former `DSP ↔ ORPG` contract. The RCP now owns the WSR-88D RDA emulation (ICD 2620002\) and the by-radial Level-II feed to ORPG; the DSP plays no part in it.
+
+### **6.1 DSP ↔ RCP control-plane capability checklist**
+
+The bullet above names the *categories* of the `DSP↔RCP` contract; this checklist pins down capabilities the schema (Phase 0\) must account for, so they aren't discovered mid-implementation. It was compiled by studying the *functional* shape of a mature signal processor's host interface (RVP900-class, Chapter "Host Computer Commands" and its developer's-notes appendix) — capabilities only, never RVP900's actual command syntax or wire format, consistent with the sourcing rule in `docs/index.md`.
+
+* **Setup phase vs. running phase are distinct.** Applying configuration (filters, thresholds, dealiasing mode, scan mode, calibration constants) is a separate step from starting/stopping acquisition; the DSP validates and acknowledges a setup before entering the running phase, rather than accepting config changes implicitly mid-stream.  
+* **Mandatory link self-test at connect.** Every time the RCP (re)connects, an interface self-test precedes trusting the link for control — not just a TCP/WebSocket handshake.  
+* **Config is readable, not just writable.** Every runtime parameter the RCP can set (filter thresholds, dealiasing mode, calibration constants) is also readable on demand, so the RCP can confirm applied state rather than assuming a write succeeded.  
+* **Capability-flags reporting.** The DSP reports which optional processing modes it currently supports (e.g. which dealiasing methods are enabled, spectral-vs-pulse-pair fallback availability) as part of status — not folded into a single up/down health bit.  
+* **Data-completeness and drift telemetry, not just link health.** Per-ray bin-acquisition success counts (a data-completeness metric distinct from "link is up"), per-channel noise-floor and DC-offset readback, and trigger-period drift (measured vs. commanded PRF) all feed the Status & BITE Manager alongside fault/config-error/mode-flag severity tiers.  
+* **Narrowband interference (RFI) filtering, as a capability distinct from ground-clutter filtering.** Flagged for a Phase-0 decision against the target radar's actual RFI environment — not committed Stage-1 scope by itself; if confirmed necessary it extends the Clutter Filter component (§4.4), not a new component.
 
 **Moment vocabulary (canonical):** UZ (uncorrected reflectivity, Zuncorr), CZ (corrected reflectivity, Zcorr), V, W, ZDR, ΦDP, KDP, LDR, ρHV; quality indices SQI, CCOR, SIG; raw I, Q. This reconciles the legacy Vesta naming (dBZ/dBT) and the RCP naming (UZ/CZ) into one set used by both contracts and consistent with the RCP's Level-II encoding.
 

@@ -104,6 +104,8 @@ Several DSP-side algorithms (see the LAMULA DSP plan, §4.5, and `docs/algorithm
 * **[GMAP clutter filtering](algorithms/gmap-clutter-filtering.md)** and **[pulse-pair moment estimation](algorithms/pulse-pair-moments.md)** are downstream consumers of the decimated I/Q the DRx exports; no additional DRx capability is required beyond timing/phase fidelity of the DDC chain already in scope.
 * **[SZ(8/64) second-trip recovery](algorithms/sz-second-trip-recovery.md)** would require the Tx-reference DAC path to synthesize a pulse-to-pulse phase-coded waveform, not just a fixed-phase reference. This is **not** required for Stage 1; it is flagged here as a DAC/Tx-Reference Path constraint to revisit if/when that algorithm is pulled forward from Stage 2.
 
+**Azimuth-sector-dependent PRF/pulse-width ("pie-slice" sectoring) — flagged for a Phase-0 decision, not committed scope.** Studying the functional shape of a mature signal processor's host interface (RVP900-class) surfaced a capability more granular than what §3.1's Timing/Trigger Engine currently names: a single global PRF/pulse-width pair per scan, versus a table of PRF/pulse-width values that switch by azimuth sector within one sweep. If the DSP↔RCP checklist in the LAMULA DSP plan (§6.1) confirms this is needed for the target Gematronik radar's scan strategies, it is a Timing/Trigger Engine (PL) requirement — the trigger tables would need per-sector entries, not just a single configured PRF/pulse-width — and a corresponding field in the `DRx↔DSP` configuration direction (§6). Not assumed necessary without that confirmation.
+
 ## **5\. Technology Stack**
 
 | Layer | Choice | Rationale |
