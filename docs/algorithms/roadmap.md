@@ -133,8 +133,10 @@ dominante en escenarios bimodales) y para
 [mapas de clutter](mapas-de-clutter.md) (`crates/clutter`: notch, GMAP con
 ajuste gaussiano por mínimos cuadrados y degradación explícita a notch, y el
 clasificador de persistencia potencia/CV temporal para la generación del
-mapa). Están pendientes en el resto de algoritmos de fase 2 en adelante
-(RFI, dual-PRF, staggered-PRT).
+mapa) y para [filtrado de RFI](rfi-filtrado.md) (`crates/rfi`: detección por
+exceso sobre la mediana más anchura angosta, interpolación reutilizando sin
+reimplementar el `gmap_filter` de `crates/clutter`). Están pendientes en el
+resto de algoritmos de fase 2 en adelante (dual-PRF, staggered-PRT).
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,

@@ -1,6 +1,6 @@
 # Filtrado de interferencia de banda estrecha (RFI)
 
-> **Oráculo en Python**: [`tools/oracles/rfi_filtrado.ipynb`](../../tools/oracles/rfi_filtrado.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/rfi_filtrado.ipynb`](../../tools/oracles/rfi_filtrado.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/rfi`: detección por combinación de exceso sobre la mediana (28 dB, calibrado contra el peor caso de falso positivo por comparaciones múltiples con M=256) y anchura angosta contigua al pico (máximo 3 bins, el lóbulo de la ventana de Hann, no la anchura Doppler de un eco real). La interpolación reutiliza sin reimplementar el `gmap_filter` de `crates/clutter` (mismo mecanismo de ajuste gaussiano), contrastada numéricamente contra el oráculo en `crates/rfi/tests/against_oracle.rs`, incluida la prueba de orden RFI-antes-que-clutter.
 
 ## Qué resuelve
 

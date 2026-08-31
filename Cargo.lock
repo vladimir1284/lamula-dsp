@@ -101,6 +101,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-rfi"
+version = "0.1.0"
+dependencies = [
+ "lamula-clutter",
+ "lamula-noise",
+ "lamula-simulator",
+ "rand",
+ "rand_distr",
+ "rustfft",
+]
+
+[[package]]
 name = "lamula-simulator"
 version = "0.1.0"
 dependencies = [
