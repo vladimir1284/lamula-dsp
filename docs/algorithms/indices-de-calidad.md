@@ -1,6 +1,6 @@
 # Índices de calidad: SQI, CCOR y SIG
 
-> **Oráculo en Python**: [`tools/oracles/indices_de_calidad.ipynb`](../../tools/oracles/indices_de_calidad.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/indices_de_calidad.ipynb`](../../tools/oracles/indices_de_calidad.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/quality`: SQI, CCOR y SIG como funciones puras sobre cantidades ya calculadas por otros algoritmos, contrastada numéricamente contra el oráculo en `crates/quality/tests/against_oracle.rs`.
 
 ## Qué resuelve
 

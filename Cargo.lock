@@ -69,6 +69,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-quality"
+version = "0.1.0"
+dependencies = [
+ "lamula-noise",
+ "lamula-simulator",
+ "rand",
+ "rand_distr",
+ "rustfft",
+]
+
+[[package]]
 name = "lamula-range"
 version = "0.1.0"
 dependencies = [
