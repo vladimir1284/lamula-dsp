@@ -1,6 +1,6 @@
 # Procesamiento de rango y modos de barrido
 
-> **Oráculo en Python**: [`tools/oracles/procesamiento_de_rango.ipynb`](../../tools/oracles/procesamiento_de_rango.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/procesamiento_de_rango.ipynb`](../../tools/oracles/procesamiento_de_rango.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/range`: asignación de gate, promediado de celda gruesa y composición de split-cut, contrastada numéricamente contra el oráculo en `crates/range/tests/against_oracle.rs`. El ensamblado de radial desde encoder SSI queda pendiente (sin oráculo todavía).
 
 ## Qué resuelve
 

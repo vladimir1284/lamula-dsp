@@ -1,0 +1,15 @@
+[package]
+name = "lamula-range"
+description = "Asignación y promediado de rango, y composición de split-cut, del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+lamula-noise = { path = "../noise" }
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"
+rustfft = "6"
