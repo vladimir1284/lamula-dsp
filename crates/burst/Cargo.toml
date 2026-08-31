@@ -1,0 +1,16 @@
+[package]
+name = "lamula-burst"
+description = "Medida de burst, corrección de fase por coherent-on-receive y lazo de AFC del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustfft = "6"
+
+[dev-dependencies]
+lamula-noise = { path = "../noise" }
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"
+rand_distr = "0.4"

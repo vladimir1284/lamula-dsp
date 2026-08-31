@@ -115,8 +115,11 @@ para la mitad con oráculo de [ruido y umbrales](ruido-y-umbrales.md)
 [calibración de reflectividad](reflectivity-calibration.md) (`crates/calibration`:
 potencia↔dBZ con constante de radar y corrección por r²) y para
 [procesamiento de rango](procesamiento-de-rango.md) (`crates/range`:
-asignación de gate, promediado de celda gruesa, composición de split-cut);
-están pendientes en el resto de algoritmos.
+asignación de gate, promediado de celda gruesa, composición de split-cut) y
+para [burst, fase y AFC](burst-fase-afc.md) (`crates/burst`: fase/frecuencia
+del burst, corrección coherent-on-receive, lazo de AFC con congelamiento y
+BITE) — completando así toda la fase 1 del plan de trabajo salvo el
+ensamblado final de radial. Están pendientes en el resto de algoritmos.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,

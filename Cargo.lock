@@ -26,6 +26,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-burst"
+version = "0.1.0"
+dependencies = [
+ "lamula-noise",
+ "lamula-simulator",
+ "rand",
+ "rand_distr",
+ "rustfft",
+]
+
+[[package]]
 name = "lamula-calibration"
 version = "0.1.0"
 dependencies = [

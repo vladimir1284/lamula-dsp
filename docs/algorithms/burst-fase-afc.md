@@ -1,6 +1,6 @@
 # Burst de transmisión, corrección de fase y AFC
 
-> **Oráculo en Python**: [`tools/oracles/burst_fase_afc.ipynb`](../../tools/oracles/burst_fase_afc.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/burst_fase_afc.ipynb`](../../tools/oracles/burst_fase_afc.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/burst`: medida de fase/frecuencia del burst, corrección de fase coherent-on-receive y lazo de AFC de primer orden con congelamiento y BITE, contrastada numéricamente contra el oráculo en `crates/burst/tests/against_oracle.rs`. Medida de amplitud como entrada al BITE de potencia, y límites de excursión/velocidad de cambio del lazo, quedan pendientes.
 
 ## Qué resuelve
 
