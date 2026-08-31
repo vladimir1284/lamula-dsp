@@ -9,7 +9,7 @@ flowchart LR
     C -- Level-II / RDA emulation --> D[ORPG]
 ```
 
-- **[LAMULA DRx](drx-plan.md)** — receptor digital sobre FPGA: adquiere IF/I-Q desde el receptor analógico existente y lo entrega al DSP.
+- **[LAMULA DRx](drx-plan.md)** — receptor digital sobre FPGA: adquiere IF/I-Q desde el receptor analógico existente y lo entrega al DSP. Su plan y su documentación viven ahora en [su propio sitio](https://lamula-drx-docs.pages.dev/).
 - **[LAMULA DSP](dsp-plan.md)** — procesador de señal headless en Rust sobre Linux SBC: convierte series de tiempo I/Q en momentos meteorológicos (reflectividad, velocidad, ancho espectral), reemplazando el stack Vesta DRX.
 - **[LAMULA RCP](rcp-plan.md)** — Radar Control Processor y MMI del operador: controla el radar, archiva la observación volumétrica como NEXRAD Level-II y alimenta a ORPG vía emulación RDA.
 
