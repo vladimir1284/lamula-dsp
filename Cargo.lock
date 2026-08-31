@@ -144,6 +144,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-staggered-prt"
+version = "0.1.0"
+dependencies = [
+ "lamula-dual-prf",
+ "rand",
+ "rand_distr",
+ "rustfft",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"

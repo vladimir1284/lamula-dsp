@@ -138,8 +138,13 @@ exceso sobre la mediana más anchura angosta, interpolación reutilizando sin
 reimplementar el `gmap_filter` de `crates/clutter`) y para
 [dual-PRF](dual-prf-dealiasing.md) (`crates/dual-prf`: desdoblado por
 teorema chino del resto sobre velocidades pulse-pair y corrección por
-continuidad espacial). Está pendiente
-[staggered-PRT](staggered-prt.md), el último algoritmo de fase 2.
+continuidad espacial) y para [staggered-PRT](staggered-prt.md)
+(`crates/staggered-prt`: velocidades pulse-pair sobre las dos subsecuencias
+`T1`/`T2` de la misma ráfaga, desdobladas reutilizando sin reimplementar el
+mecanismo de `crates/dual-prf`). Con esto queda completa la fase 2 del plan
+de trabajo en los pasos 2 y 3 del método; el filtrado de clutter en
+muestreo escalonado (Sachidananda & Zrnić 2000) y la fase 3 del plan
+(polarimetría) siguen pendientes.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,

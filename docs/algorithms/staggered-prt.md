@@ -1,6 +1,6 @@
 # Staggered-PRT
 
-> **Oráculo en Python**: [`tools/oracles/staggered_prt.ipynb`](../../tools/oracles/staggered_prt.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/staggered_prt.ipynb`](../../tools/oracles/staggered_prt.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/staggered-prt`: velocidades pulse-pair sobre las dos subsecuencias `T1`/`T2` de la misma ráfaga, contrastada numéricamente contra el oráculo en `crates/staggered-prt/tests/against_oracle.rs`. El desdoblado reutiliza sin reimplementar el mecanismo de teorema chino del resto de `crates/dual-prf` — la propia página lo señala como "exactamente el mismo mecanismo", sólo cambia de dónde salen `v1`/`v2`. El filtrado de clutter en muestreo escalonado (Sachidananda & Zrnić 2000) queda fuera de alcance, tal como la página lo autoriza para Stage 1.
 
 ## Qué resuelve
 

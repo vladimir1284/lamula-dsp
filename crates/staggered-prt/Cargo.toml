@@ -1,0 +1,15 @@
+[package]
+name = "lamula-staggered-prt"
+description = "Estimador de velocidad y desdoblado por muestreo escalonado (staggered-PRT) del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustfft = "6"
+
+[dev-dependencies]
+lamula-dual-prf = { path = "../dual-prf" }
+rand = "0.8"
+rand_distr = "0.4"
