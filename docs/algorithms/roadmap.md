@@ -119,7 +119,11 @@ asignación de gate, promediado de celda gruesa, composición de split-cut) y
 para [burst, fase y AFC](burst-fase-afc.md) (`crates/burst`: fase/frecuencia
 del burst, corrección coherent-on-receive, lazo de AFC con congelamiento y
 BITE) — completando así toda la fase 1 del plan de trabajo salvo el
-ensamblado final de radial. Están pendientes en el resto de algoritmos.
+ensamblado final de radial. En fase 2, están hechos el paso 2 y el paso 3
+para [pulse-pair](pulse-pair-moments.md) (`crates/moments`: potencia,
+velocidad y ancho espectral; el estimador espectral como modo alternativo
+queda pendiente). Están pendientes en el resto de algoritmos de fase 2 en
+adelante.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,

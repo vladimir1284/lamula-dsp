@@ -1,0 +1,15 @@
+[package]
+name = "lamula-moments"
+description = "Estimador pulse-pair de potencia, velocidad y ancho espectral del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lamula-noise = { path = "../noise" }
+rustfft = "6"
+
+[dev-dependencies]
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"

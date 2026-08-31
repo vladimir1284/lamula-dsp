@@ -1,6 +1,6 @@
 # Pulse-Pair y Estimación de Momentos
 
-> **Oráculo en Python**: [`tools/oracles/pulse_pair_moments.ipynb`](../../tools/oracles/pulse_pair_moments.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/pulse_pair_moments.ipynb`](../../tools/oracles/pulse_pair_moments.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/moments`: potencia, velocidad y ancho espectral por pulse-pair, contrastada numéricamente contra el oráculo en `crates/moments/tests/against_oracle.rs`. El estimador espectral (FFT + ajuste) como modo alternativo queda pendiente (sin oráculo todavía).
 
 ## Qué resuelve
 
