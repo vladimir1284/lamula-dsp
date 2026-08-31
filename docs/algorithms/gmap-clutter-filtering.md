@@ -1,6 +1,6 @@
 # Filtrado de Clutter GMAP
 
-> **Oráculo en Python**: [`tools/oracles/gmap_clutter_filtering.ipynb`](../../tools/oracles/gmap_clutter_filtering.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/gmap_clutter_filtering.ipynb`](../../tools/oracles/gmap_clutter_filtering.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/clutter`: notch clásico, GMAP (ajuste gaussiano por mínimos cuadrados sobre los bins con señal por encima del ruido, degradado a notch cuando el ajuste no es fiable) y extracción de momentos sobre el espectro corregido, contrastada numéricamente contra el oráculo en `crates/clutter/tests/against_oracle.rs`. El oráculo exige promediar varios periodogramas independientes antes de ajustar (un solo barrido es demasiado ruidoso bin a bin); esa responsabilidad queda del lado del llamador, que entrega ya el periodograma promediado y el umbral de ruido por bin como cantidades precalculadas.
 
 ## Qué resuelve
 

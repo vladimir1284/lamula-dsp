@@ -1,6 +1,6 @@
 # Mapas de clutter
 
-> **Oráculo en Python**: [`tools/oracles/mapas_de_clutter.ipynb`](../../tools/oracles/mapas_de_clutter.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/mapas_de_clutter.ipynb`](../../tools/oracles/mapas_de_clutter.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/clutter`: clasificador de persistencia (media de potencia y coeficiente de variación temporal sobre varios barridos) para la generación del mapa, contrastado numéricamente contra el oráculo en `crates/clutter/tests/against_oracle.rs`. La aplicación del mapa reutiliza el mismo `gmap_filter` de [GMAP](gmap-clutter-filtering.md): una máscara de clutter vacía recorre el mismo camino de código que "sin filtro", sin rama aparte. La generación/ciclo de vida del mapa en disco y la dependencia con la elevación quedan fuera de este crate.
 
 ## Qué resuelve
 

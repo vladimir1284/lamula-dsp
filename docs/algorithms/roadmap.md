@@ -128,8 +128,13 @@ queda pendiente) y para [índices de calidad](indices-de-calidad.md)
 periodograma con ventana de Hann, recorte de línea principal y recentrado
 circular; el oráculo documenta que su varianza de velocidad no iguala al
 pulse-pair en modo unimodal, y que su valor real está en aislar el modo
-dominante en escenarios bimodales). Están pendientes en el resto de
-algoritmos de fase 2 en adelante.
+dominante en escenarios bimodales) y para
+[GMAP](gmap-clutter-filtering.md) y
+[mapas de clutter](mapas-de-clutter.md) (`crates/clutter`: notch, GMAP con
+ajuste gaussiano por mínimos cuadrados y degradación explícita a notch, y el
+clasificador de persistencia potencia/CV temporal para la generación del
+mapa). Están pendientes en el resto de algoritmos de fase 2 en adelante
+(RFI, dual-PRF, staggered-PRT).
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,
