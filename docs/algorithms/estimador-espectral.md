@@ -1,6 +1,6 @@
 # Estimador espectral de momentos
 
-> **Oráculo en Python**: [`tools/oracles/estimador_espectral.ipynb`](../../tools/oracles/estimador_espectral.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/estimador_espectral.ipynb`](../../tools/oracles/estimador_espectral.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/spectral`: periodograma con ventana de Hann, umbral HS74, recorte de línea principal y recentrado circular, contrastada numéricamente contra el oráculo en `crates/spectral/tests/against_oracle.rs`. El oráculo deja constancia de que esta implementación directa no iguala la varianza de velocidad del pulse-pair en modo unimodal (hace falta ajuste gaussiano por mínimos cuadrados o promediado de periodogramas para eso); sí recupera el modo dominante en escenarios bimodales, que es la razón de ser del modo.
 
 ## Qué resuelve
 
