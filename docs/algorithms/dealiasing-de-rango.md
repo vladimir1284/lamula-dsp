@@ -1,6 +1,6 @@
 # Dealiasing de rango: ecos de trip múltiple
 
-> **Oráculo en Python**: [`tools/oracles/dealiasing_de_rango.ipynb`](../../tools/oracles/dealiasing_de_rango.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/dealiasing_de_rango.ipynb`](../../tools/oracles/dealiasing_de_rango.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/range-dealias`: detección/marcado por reconciliación dual-PRF y recuperación de primer trip por fase aleatoria en magnetrón, reutilizando sin reimplementar `crates/burst` y `crates/moments`, contrastada numéricamente contra el oráculo en `crates/range-dealias/tests/against_oracle.rs`. SZ(8/64) sigue diferido a Stage 2 en su propia página.
 
 ## Qué resuelve
 

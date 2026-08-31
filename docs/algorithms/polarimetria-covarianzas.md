@@ -1,6 +1,6 @@
 # Variables polarimétricas: ZDR, ρHV, ΦDP y LDR
 
-> **Oráculo en Python**: [`tools/oracles/polarimetria_covarianzas.ipynb`](../../tools/oracles/polarimetria_covarianzas.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/polarimetria_covarianzas.ipynb`](../../tools/oracles/polarimetria_covarianzas.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/polarimetry`: ZDR/ρHV/ΦDP en modo simultáneo, ρHV corregido por decorrelación de retardo medio-PRT en modo alternante (Sachidananda & Zrnić 1989) y LDR con saturación por aislamiento de antena, contrastada numéricamente contra el oráculo en `crates/polarimetry/tests/against_oracle.rs`. La corrección de ΦDP en modo alternante por el término de fase Doppler del retardo medio-PRT queda pendiente — el oráculo no la valida todavía.
 
 ## Qué resuelve
 

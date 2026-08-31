@@ -1,6 +1,6 @@
 # Calibración polarimétrica: ZDR y ΦDP de sistema
 
-> **Oráculo en Python**: [`tools/oracles/calibracion_polarimetrica.ipynb`](../../tools/oracles/calibracion_polarimetrica.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/calibracion_polarimetrica.ipynb`](../../tools/oracles/calibracion_polarimetrica.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/pol-calibration`: offset de ZDR por birdbath y ΦDP de sistema, los dos por mediana sobre un dwell, contrastada numéricamente contra el oráculo en `crates/pol-calibration/tests/against_oracle.rs`. La aplicación del offset ya vive en `crates/polarimetry` (misma resta, probada donde vive el código que la hace); los tres métodos de determinación como campañas de operador quedan fuera de este crate salvo la simetría del birdbath, la única con verdad-terreno sintética propia.
 
 ## Qué resuelve
 

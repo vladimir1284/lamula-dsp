@@ -1,6 +1,6 @@
 # Estimación de KDP
 
-> **Oráculo en Python**: [`tools/oracles/kdp_estimacion.ipynb`](../../tools/oracles/kdp_estimacion.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/kdp_estimacion.ipynb`](../../tools/oracles/kdp_estimacion.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/kdp`: desdoblado de ΦDP y ventana deslizante de mínimos cuadrados (Ryzhkov & Zrnić 1996), contrastada numéricamente contra el oráculo en `crates/kdp/tests/against_oracle.rs`. Las variantes adaptativa y variacional/iterativa quedan pendientes, como mejora posterior a Stage 1. El contraste contra Py-ART sigue sin hacerse (sin Py-ART disponible en esta sesión).
 
 ## Qué resuelve
 

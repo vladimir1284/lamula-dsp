@@ -142,9 +142,28 @@ continuidad espacial) y para [staggered-PRT](staggered-prt.md)
 (`crates/staggered-prt`: velocidades pulse-pair sobre las dos subsecuencias
 `T1`/`T2` de la misma ráfaga, desdobladas reutilizando sin reimplementar el
 mecanismo de `crates/dual-prf`). Con esto queda completa la fase 2 del plan
-de trabajo en los pasos 2 y 3 del método; el filtrado de clutter en
-muestreo escalonado (Sachidananda & Zrnić 2000) y la fase 3 del plan
-(polarimetría) siguen pendientes.
+de trabajo en los pasos 2 y 3 del método, salvo el filtrado de clutter en
+muestreo escalonado (Sachidananda & Zrnić 2000), que sigue pendiente. En
+fase 3, están hechos el paso 2 y el paso 3 para
+[covarianzas polarimétricas](polarimetria-covarianzas.md)
+(`crates/polarimetry`: ZDR/ρHV/ΦDP en modo simultáneo, ρHV corregido por
+decorrelación de retardo medio-PRT en modo alternante, LDR con saturación
+por aislamiento de antena) y para [KDP](kdp-estimacion.md) (`crates/kdp`:
+desdoblado de ΦDP y ventana deslizante de mínimos cuadrados, Ryzhkov & Zrnić
+1996) y para
+[calibración polarimétrica](calibracion-polarimetrica.md)
+(`crates/pol-calibration`: offset de ZDR por birdbath y ΦDP de sistema, los
+dos por mediana sobre un dwell — la aplicación del offset ya vive en
+`crates/polarimetry`, no se repite aquí) y para
+[dealiasing de rango](dealiasing-de-rango.md) (`crates/range-dealias`:
+detección/marcado dual-PRF y recuperación de primer trip por fase aleatoria
+en magnetrón, reutilizando sin reimplementar `crates/burst` y
+`crates/moments`) y para
+[analizador de espectro de FI](analizador-espectro-fi.md)
+(`crates/spectrum-analyzer`: periodograma de Welch con normalización de
+ganancia coherente y corrección ENBW explícita para el suelo de ruido).
+Con esto queda completa la fase 3 del plan de trabajo en los pasos 2 y 3
+del método.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,

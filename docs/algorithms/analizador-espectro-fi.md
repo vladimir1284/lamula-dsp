@@ -1,6 +1,6 @@
 # Analizador de espectro de FI
 
-> **Oráculo en Python**: [`tools/oracles/analizador_espectro_fi.ipynb`](../../tools/oracles/analizador_espectro_fi.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/analizador_espectro_fi.ipynb`](../../tools/oracles/analizador_espectro_fi.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/spectrum-analyzer`: periodograma de Welch con normalización de ganancia coherente y ENBW (Harris 1978) para corregir la lectura de un suelo de ruido, contrastada numéricamente contra el oráculo en `crates/spectrum-analyzer/tests/against_oracle.rs`.
 
 ## Qué resuelve
 

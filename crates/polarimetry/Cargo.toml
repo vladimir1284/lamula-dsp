@@ -1,0 +1,16 @@
+[package]
+name = "lamula-polarimetry"
+description = "Estimador de variables polarimétricas (ZDR, ρHV, ΦDP, LDR) del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lamula-noise = { path = "../noise" }
+rustfft = "6"
+
+[dev-dependencies]
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"
+rand_distr = "0.4"

@@ -1,0 +1,16 @@
+[package]
+name = "lamula-kdp"
+description = "Estimación de KDP (fase diferencial específica) del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+lamula-polarimetry = { path = "../polarimetry" }
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"
+rand_distr = "0.4"
+rustfft = "6"

@@ -71,6 +71,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-kdp"
+version = "0.1.0"
+dependencies = [
+ "lamula-polarimetry",
+ "lamula-simulator",
+ "rand",
+ "rand_distr",
+ "rustfft",
+]
+
+[[package]]
 name = "lamula-moments"
 version = "0.1.0"
 dependencies = [
@@ -86,6 +97,26 @@ version = "0.1.0"
 dependencies = [
  "lamula-simulator",
  "rand",
+ "rustfft",
+]
+
+[[package]]
+name = "lamula-pol-calibration"
+version = "0.1.0"
+dependencies = [
+ "lamula-polarimetry",
+ "lamula-simulator",
+ "rand",
+]
+
+[[package]]
+name = "lamula-polarimetry"
+version = "0.1.0"
+dependencies = [
+ "lamula-noise",
+ "lamula-simulator",
+ "rand",
+ "rand_distr",
  "rustfft",
 ]
 
@@ -107,6 +138,18 @@ dependencies = [
  "lamula-noise",
  "lamula-simulator",
  "rand",
+ "rustfft",
+]
+
+[[package]]
+name = "lamula-range-dealias"
+version = "0.1.0"
+dependencies = [
+ "lamula-burst",
+ "lamula-moments",
+ "lamula-simulator",
+ "rand",
+ "rand_distr",
  "rustfft",
 ]
 
@@ -138,6 +181,15 @@ version = "0.1.0"
 dependencies = [
  "lamula-noise",
  "lamula-simulator",
+ "rand",
+ "rand_distr",
+ "rustfft",
+]
+
+[[package]]
+name = "lamula-spectrum-analyzer"
+version = "0.1.0"
+dependencies = [
  "rand",
  "rand_distr",
  "rustfft",
