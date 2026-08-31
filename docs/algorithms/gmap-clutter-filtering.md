@@ -14,6 +14,48 @@ GMAP requiere trabajar en el dominio espectral (FFT de la serie temporal, correc
 
 El componente **Clutter Filter** del pipeline (ver el plan de LAMULA DSP) implementará GMAP como filtro primario en el dominio espectral, con un filtro IIR de menor costo como modo alternativo para celdas de bajo riesgo de clutter, y mapas de clutter fijos como entrada auxiliar — la misma jerarquía de tres niveles (mapa fijo → IIR → adaptativo espectral) que documentan los procesadores líderes del mercado.
 
+## Configuraciones cubiertas
+
+Independiente del transmisor, con la condición habitual del magnetrón: la
+corrección de fase tiene que haberse aplicado antes, o el espectro sobre el que
+GMAP busca el clutter no existe.
+
+Con polarimetría hay una decisión que sesga ZDR si se toma mal: el filtro se
+aplica a los dos canales, pero **la decisión de filtrar y la anchura del hueco
+tienen que ser la misma para ambos**. Filtrar cada canal por separado con
+decisiones independientes hace que en unas celdas se quite potencia de H y no de
+V, y esa diferencia se publica como ZDR sin serlo. La regla es: decisión
+conjunta, aplicación por canal.
+
+## Parámetros del contrato que consume
+
+De `config`: `clutter_filter` (`none`, `gmap` o `notch`), `clutter_width_ms` como
+anchura espectral asumida del clutter, `ccor_threshold` para la censura por
+corrección excesiva y `n_pulses` como longitud de FFT. Consume además el
+[mapa de clutter](mapas-de-clutter.md) como entrada auxiliar. Publica el momento
+`ccor`, la bandera `ray_flag.clutter_filtered` y `moment_flag.filtered` en los
+bloques afectados.
+
+## Criterio de aceptación
+
+Tres escenarios y los tres son necesarios. Primero, clutter inyectado de potencia
+conocida sobre meteoro de momentos conocidos, barriendo la razón clutter-señal:
+los momentos recuperados deben seguir la verdad-terreno dentro del margen
+declarado, y el criterio se expresa como curva frente a esa razón. Segundo, y es
+el que justifica GMAP frente a un notch, meteoro con velocidad radial cercana a
+cero superpuesto al clutter: ahí un notch destruye la señal y GMAP debe
+recuperarla, y la diferencia entre ambos es el resultado que hay que medir y
+publicar. Tercero, ausencia de clutter con el filtro activo: los momentos no
+deben degradarse más allá de un margen mínimo declarado.
+
+## Coste de cómputo
+
+Una FFT y una IFFT de longitud `n_pulses` por celda y por canal, más el ajuste
+gaussiano: el mismo orden que el [estimador espectral](estimador-espectral.md), y
+la etapa más cara del pipeline cuando está activa en todas las celdas. Es la
+razón práctica de tener mapa de clutter: desactivar el filtro donde no hace falta
+es la optimización de mayor rendimiento disponible.
+
 ## Referencias abiertas / implementaciones libres
 
 - Siggia, A. D. & Passarelli, R. E. (2004), "Gaussian Model Adaptive Processing (GMAP) for Improved Ground Clutter Cancellation and Moment Calculation", *Proceedings of ERAD 2004*, Copernicus GmbH.

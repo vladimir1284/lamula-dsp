@@ -14,6 +14,45 @@ La ventaja del pulse-pair frente a una FFT completa del espectro Doppler es el c
 
 El **Moment Estimator** del pipeline de LAMULA DSP (ver el plan de LAMULA DSP, sección de arquitectura) implementará este estimador como algoritmo primario, con la variante de estimación espectral (FFT + ajuste) reservada como modo alternativo de mayor costo para escenarios donde la relación señal/clutter lo justifique — la misma dualidad que documentan los procesadores comerciales de gama alta.
 
+## Configuraciones cubiertas
+
+Independiente de la polarimetría —se aplica por canal— con una salvedad: en modo
+alternante, las muestras de cada canal están separadas por dos PRT en vez de uno,
+así que la velocidad de Nyquist efectiva es la mitad y el retardo de la
+autocovarianza que se usa no es el mismo. Respecto del transmisor, la
+dependencia es dura: con magnetrón la serie temporal **no es coherente** hasta
+que se le ha aplicado la [corrección de fase por burst](burst-fase-afc.md), y
+sobre una serie sin corregir el estimador de velocidad devuelve ruido uniforme.
+Con transmisor coherente esa etapa es opcional. Ésa es la razón de que el burst
+suba a la fase 1 del [plan de trabajo](roadmap.md).
+
+## Parámetros del contrato que consume
+
+De `config`: `estimator = pulse_pair`, `n_pulses` como número de muestras,
+`wavelength_m` y `prf_hz` para escalar la velocidad, `noise_floor_dbm` para la
+resta de ruido, y los cuatro umbrales de censura. Publica `uz`, `cz`, `v` y `w`,
+y las cantidades intermedias que alimentan los
+[índices de calidad](indices-de-calidad.md).
+
+## Criterio de aceptación
+
+Malla de (SNR, σv, M) con N realizaciones independientes por punto: el sesgo y la
+desviación estándar de los tres momentos deben quedar dentro del margen declarado
+respecto de la varianza teórica de Doviak & Zrnić, capítulo 6. El caso límite que
+más importa vigilar es σv grande con M pequeño, donde el estimador de ancho
+espectral se satura, y σv muy pequeño, donde la fórmula del logaritmo se vuelve
+numéricamente delicada; los dos extremos deben tener comportamiento declarado y
+no un NaN.
+
+## Coste de cómputo
+
+Un producto complejo y dos acumulaciones por muestra: O(M) por celda y canal, la
+opción más barata del conjunto. Es el bucle caliente principal del pipeline junto
+con la corrección de fase, y el candidato natural a SIMD. Debe calcular en la
+misma pasada R(0), R(1) y las potencias por canal que necesita la
+[polarimetría](polarimetria-covarianzas.md), para no recorrer los datos dos
+veces.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2nd ed., Academic Press, 1993 — capítulo 6 (formulación completa de los estimadores).

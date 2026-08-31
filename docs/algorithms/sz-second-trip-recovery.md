@@ -14,6 +14,46 @@ Esta técnica es sustancialmente más sofisticada que el enfoque clásico previo
 
 Dado que esta técnica exige generar en transmisión un patrón de fase específico (co-diseño con el excitador/DRx) y decodificar en el DSP con el algoritmo espectral correspondiente, LAMULA DSP la documenta como capacidad de **Stage 2 / diferida** salvo que el hardware de excitación ya soporte modulación de fase programable pulso a pulso — se registra aquí como referencia de diseño para cuando ese workstream se aborde, en vez de comprometerse a M4 del Stage 1.
 
+## Configuraciones cubiertas
+
+Ésta es la página del conjunto con la dependencia de hardware más estricta.
+SZ(8/64) exige un excitador capaz de imponer una fase programada pulso a pulso,
+lo que en la práctica significa transmisor coherente con modulación de fase
+gobernable. **Con un magnetrón no se puede aplicar SZ** —la fase no se elige— pero
+sí existe la vía análoga que explota la aleatoriedad natural del magnetrón, que
+se describe en [dealiasing de rango](dealiasing-de-rango.md). Es decir: las dos
+configuraciones tienen camino, pero son caminos distintos, y ninguno de los dos
+es «SZ con otro nombre».
+
+La polarimetría es ortogonal, con la nota de que en modo alternante hay la mitad
+de muestras por canal y la separación estadística de los trips empeora en
+consecuencia.
+
+## Parámetros del contrato que consume
+
+De `config`: `range_dealias` como interruptor. La capacidad real se declara en
+`capability_flags` del mensaje `capabilities`, y una instalación que no pueda
+codificar fase debe declararlo así en vez de aceptar el bit sin hacer nada.
+Publica `unambiguous_range_m`, que el contrato define como `c/(2·PRF)` salvo
+recuperación de trip.
+
+## Criterio de aceptación
+
+Cuando este trabajo se aborde: escenarios con eco de segundo trip inyectado a
+rango y momentos conocidos sobre eco de primer trip también conocido, y el
+criterio expresado como curva de exactitud de los momentos de cada trip frente a
+la razón de potencias entre ambos. La cifra que caracteriza la implementación es
+la supresión alcanzada en dB, comparable con la publicada en la literatura para
+el mismo código.
+
+## Coste de cómputo
+
+Procesamiento espectral por celda y por trip, con la decodificación de fase
+correspondiente a cada trip: del orden de una FFT por trip además del filtrado de
+clutter, que en presencia de trips superpuestos también hay que rehacer por trip.
+Es el algoritmo más caro del conjunto y su viabilidad en el hardware objetivo
+tiene que medirse antes de comprometerlo.
+
 ## Referencias abiertas / implementaciones libres
 
 - Sachidananda, M. & Zrnić, D. S. (1999), "Systematic Phase Codes for Resolving Range Overlaid Signals in a Doppler Weather Radar", *Journal of Atmospheric and Oceanic Technology*, vol. 16.

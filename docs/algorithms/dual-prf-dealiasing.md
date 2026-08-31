@@ -14,6 +14,42 @@ El algoritmo de "unfolding" o desdoblado debe: (1) estimar la velocidad con cada
 
 El módulo de **Dealiasing** del pipeline (ver el plan de LAMULA DSP) implementará el modo dual-PRF como mecanismo primario de extensión de velocidad no ambigua, con soporte para razones configurables de PRF y continuidad espacial post-proceso — capacidad que los procesadores de gama alta ofrecen como modo de escaneo seleccionable junto al modo staggered-PRT.
 
+## Configuraciones cubiertas
+
+Independiente del tipo de transmisor. Con polarimetría alternante hay que
+analizar la interacción antes de ofrecer las dos cosas a la vez: la alternancia
+de polarización ya reduce a la mitad las muestras por canal, y combinarla con
+alternancia de PRF deja bloques de muestras demasiado cortos para una estimación
+estable. La restricción, si se adopta, se declara en `dealias_mask` y
+`capability_flags` en vez de dejarse a que el operador descubra que la
+combinación no funciona.
+
+## Parámetros del contrato que consume
+
+De `config`: `dealias_mode = dual_prf` y la razón `prf_ratio_num`/`prf_ratio_den`.
+Publica por radial la `nyquist_velocity` extendida, el `prf_hz` medio —el
+contrato lo documenta explícitamente como la media en dual-PRF— y la bandera
+`ray_flag.dealias_failed` cuando el desdoblado no converge. La disponibilidad se
+declara en `dealias_mask`; el rechazo es `dealias_unsupported`.
+
+## Criterio de aceptación
+
+El criterio es la **tasa de acierto del número de pliegues**, no el error medio
+de velocidad: un fallo de desdoblado es un error de varios múltiplos de la
+Nyquist, y promediarlo con los aciertos produce una cifra que no significa nada.
+Esa tasa se mide barriendo velocidad verdadera hasta la Nyquist extendida, SNR y
+—esto es específico del dual-PRF— cizalladura, porque el método compara medidas
+separadas por el tiempo de un radial y su punto débil es justamente que el eco
+haya cambiado entre las dos. La corrección por continuidad espacial se evalúa por
+separado: cuántos fallos aislados recupera y cuántos aciertos estropea.
+
+## Coste de cómputo
+
+Despreciable: dos estimaciones pulse-pair que ya se hacen, más una comparación y
+una búsqueda en tabla por celda. La continuidad espacial requiere acceso a celdas
+vecinas ya resueltas, lo que impone un orden de recorrido y un pequeño buffer de
+contexto, pero sigue siendo lineal.
+
 ## Referencias abiertas / implementaciones libres
 
 - Joe, P. & May, P. T. (2003), "Correction of Dual PRF Velocity Errors for Operational Doppler Weather Radars", *Journal of Atmospheric and Oceanic Technology*.

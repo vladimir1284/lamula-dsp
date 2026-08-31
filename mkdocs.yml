@@ -45,8 +45,28 @@ nav:
   - Contratos de cable: contracts/index.md
   - Algoritmos de procesamiento:
       - Overview: algorithms/index.md
-      - Pulse-pair / momentos: algorithms/pulse-pair-moments.md
-      - GMAP (filtrado de clutter): algorithms/gmap-clutter-filtering.md
-      - Dual-PRF dealiasing: algorithms/dual-prf-dealiasing.md
-      - SZ second-trip recovery: algorithms/sz-second-trip-recovery.md
-      - Calibración de reflectividad: algorithms/reflectivity-calibration.md
+      - Plan de estudio e implementación: algorithms/roadmap.md
+      - Cadena de señal:
+          - Simulador de I/Q: algorithms/simulador-iq.md
+          - Burst, fase y AFC: algorithms/burst-fase-afc.md
+          - Procesamiento de rango y modos: algorithms/procesamiento-de-rango.md
+          - Ruido y umbrales: algorithms/ruido-y-umbrales.md
+          - Filtrado de RFI: algorithms/rfi-filtrado.md
+          - Mapas de clutter: algorithms/mapas-de-clutter.md
+          - GMAP (filtrado de clutter): algorithms/gmap-clutter-filtering.md
+      - Estimación de momentos:
+          - Pulse-pair / momentos: algorithms/pulse-pair-moments.md
+          - Estimador espectral: algorithms/estimador-espectral.md
+          - Índices de calidad: algorithms/indices-de-calidad.md
+          - Calibración de reflectividad: algorithms/reflectivity-calibration.md
+      - Polarimetría:
+          - Variables polarimétricas: algorithms/polarimetria-covarianzas.md
+          - Estimación de KDP: algorithms/kdp-estimacion.md
+          - Calibración polarimétrica: algorithms/calibracion-polarimetrica.md
+      - Ambigüedades:
+          - Dual-PRF dealiasing: algorithms/dual-prf-dealiasing.md
+          - Staggered-PRT: algorithms/staggered-prt.md
+          - Dealiasing de rango: algorithms/dealiasing-de-rango.md
+          - SZ second-trip recovery: algorithms/sz-second-trip-recovery.md
+      - Diagnóstico:
+          - Analizador de espectro de FI: algorithms/analizador-espectro-fi.md

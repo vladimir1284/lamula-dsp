@@ -14,6 +14,51 @@ En operación, la calibración no es un evento único sino un proceso continuo: 
 
 El **Moment Estimator** y el **Control/Config Plane** del pipeline (ver el plan de LAMULA DSP) deben exponer los tres bloques de calibración como parámetros configurables desde el RCP (constante de radar, tabla de ganancia del receptor, piso de ruido de referencia) y soportar el modo de inyección de señal de prueba para verificación periódica — la misma estructura de tres bloques que documentan los procesadores comerciales de gama alta.
 
+## Configuraciones cubiertas
+
+Con **magnetrón** hay dos complicaciones que un transmisor coherente no tiene. La
+potencia pico varía pulso a pulso y con el envejecimiento del tubo, así que la
+medida de potencia transmitida no es una constante de instalación sino una
+cantidad a seguir de forma continua a partir de la amplitud del
+[burst](burst-fase-afc.md). Y la deriva de frecuencia desplaza la señal dentro de
+la banda de los filtros de FI, lo que introduce una pérdida variable que se
+confunde con un cambio de calibración si no se correlaciona con el estado del
+AFC. Con klistrón o estado sólido, la potencia es estable y la calibración se
+comporta como la teoría dice.
+
+Con **polarimetría**, a todo lo anterior se añade la exigencia de exactitud
+*relativa* entre canales, que es un orden de magnitud más estricta que la
+absoluta y tiene su propia página:
+[calibración polarimétrica](calibracion-polarimetrica.md).
+
+## Parámetros del contrato que consume
+
+De `config`: `radar_constant_db`, `receiver_gain_db` y `noise_floor_dbm`. El DSP
+**aplica** estos valores, no los determina: la determinación es un procedimiento
+de operador y de banco, y el contrato v0.1 no tiene mensaje de resultado de
+calibración. Cada radial publica el `radar_constant_db` y el `noise_floor_dbm`
+con los que se procesó, que es lo que permite al RCP rehacer la conversión a dBZ
+si hiciera falta —una decisión de diseño acertada del contrato, porque hace el
+producto reprocesable en vez de irreversible.
+
+## Criterio de aceptación
+
+Con potencia conocida inyectada en el simulador y constante de radar conocida, la
+reflectividad publicada debe coincidir con el valor analítico previsto por la
+ecuación del radar, celda a celda y a lo largo de todo el alcance —lo que
+verifica de paso la corrección por `r²` y, si se aplica, la de atenuación
+atmosférica—. La linealidad se comprueba barriendo la potencia inyectada sobre
+todo el rango dinámico y exigiendo desviación acotada respecto de la recta
+teórica, que es exactamente lo que reproduce en simulación el procedimiento de
+inyección de señal de prueba del sistema real.
+
+## Coste de cómputo
+
+Nulo en la práctica: la constante entra como un término aditivo en dB y la
+corrección por rango es una tabla precalculada de un valor por celda. La
+calibración no es un problema de cómputo, es un problema de procedimiento y de
+trazabilidad.
+
 ## Referencias abiertas / implementaciones libres
 
 - OMM/WMO, *Guide to Instruments and Methods of Observation*, volumen sobre radares meteorológicos — guía de referencia de procedimientos de calibración.
