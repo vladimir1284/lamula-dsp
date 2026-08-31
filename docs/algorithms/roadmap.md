@@ -141,10 +141,12 @@ teorema chino del resto sobre velocidades pulse-pair y corrección por
 continuidad espacial) y para [staggered-PRT](staggered-prt.md)
 (`crates/staggered-prt`: velocidades pulse-pair sobre las dos subsecuencias
 `T1`/`T2` de la misma ráfaga, desdobladas reutilizando sin reimplementar el
-mecanismo de `crates/dual-prf`). Con esto queda completa la fase 2 del plan
-de trabajo en los pasos 2 y 3 del método, salvo el filtrado de clutter en
-muestreo escalonado (Sachidananda & Zrnić 2000), que sigue pendiente. En
-fase 3, están hechos el paso 2 y el paso 3 para
+mecanismo de `crates/dual-prf`; filtrado de clutter Sachidananda & Zrnić
+2000 por descomposición en las dos subsecuencias uniformes y notch por
+subsecuencia, alcance de Stage 1 declarado frente a la reconstrucción
+gaussiana de `crates/clutter`). Con esto queda completa la fase 2 del plan
+de trabajo en los pasos 2 y 3 del método. En fase 3, están hechos el paso 2
+y el paso 3 para
 [covarianzas polarimétricas](polarimetria-covarianzas.md)
 (`crates/polarimetry`: ZDR/ρHV/ΦDP en modo simultáneo, ρHV corregido por
 decorrelación de retardo medio-PRT en modo alternante, LDR con saturación

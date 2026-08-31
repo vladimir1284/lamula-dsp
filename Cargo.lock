@@ -200,6 +200,7 @@ name = "lamula-staggered-prt"
 version = "0.1.0"
 dependencies = [
  "lamula-dual-prf",
+ "lamula-noise",
  "rand",
  "rand_distr",
  "rustfft",

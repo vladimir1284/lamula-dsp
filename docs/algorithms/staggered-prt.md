@@ -1,6 +1,6 @@
 # Staggered-PRT
 
-> **Oráculo en Python**: [`tools/oracles/staggered_prt.ipynb`](../../tools/oracles/staggered_prt.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/staggered-prt`: velocidades pulse-pair sobre las dos subsecuencias `T1`/`T2` de la misma ráfaga, contrastada numéricamente contra el oráculo en `crates/staggered-prt/tests/against_oracle.rs`. El desdoblado reutiliza sin reimplementar el mecanismo de teorema chino del resto de `crates/dual-prf` — la propia página lo señala como "exactamente el mismo mecanismo", sólo cambia de dónde salen `v1`/`v2`. El filtrado de clutter en muestreo escalonado (Sachidananda & Zrnić 2000) queda fuera de alcance, tal como la página lo autoriza para Stage 1.
+> **Oráculo en Python**: [`tools/oracles/staggered_prt.ipynb`](../../tools/oracles/staggered_prt.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/staggered-prt`: velocidades pulse-pair sobre las dos subsecuencias `T1`/`T2` de la misma ráfaga, contrastada numéricamente contra el oráculo en `crates/staggered-prt/tests/against_oracle.rs`. El desdoblado reutiliza sin reimplementar el mecanismo de teorema chino del resto de `crates/dual-prf` — la propia página lo señala como "exactamente el mismo mecanismo", sólo cambia de dónde salen `v1`/`v2`. El filtrado de clutter en muestreo escalonado (Sachidananda & Zrnić 2000) tiene ahora su propio oráculo, [`tools/oracles/staggered_prt_clutter_sz2000.ipynb`](../../tools/oracles/staggered_prt_clutter_sz2000.ipynb), e implementación Rust en el mismo crate (`sz2000_clutter_filter`, `reflectivity_estimate`): descompone la ráfaga en las dos subsecuencias uniformes que la componen y aplica un notch por subsecuencia, alcance de Stage 1 declarado — no la reconstrucción gaussiana (GMAP) de `crates/clutter`, cuya ausencia se mide y declara en el propio oráculo como pérdida de señal cuando la velocidad verdadera cae en la banda de notch.
 
 ## Qué resuelve
 
@@ -80,11 +80,11 @@ específico está bien implementado.
 ## Coste de cómputo
 
 Las dos autocovarianzas cuestan aproximadamente el doble que el pulse-pair
-ordinario, más la búsqueda en tabla, que es despreciable. El filtrado de clutter
-escalonado es lo caro y su coste depende de la variante que se implemente; en
-Stage 1 es razonable ofrecer staggered-PRT sin filtro de clutter y declararlo
-explícitamente en las capacidades, en vez de ofrecer las dos cosas mal
-combinadas.
+ordinario, más la búsqueda en tabla, que es despreciable. El filtrado de
+clutter añade dos FFT/IFFT de `M/2` puntos por celda —una por subsecuencia—,
+del mismo orden que el estimador espectral; la variante GMAP, si se
+implementa más adelante, costaría más por el ajuste de mínimos cuadrados en
+cada subsecuencia.
 
 ## Referencias abiertas / implementaciones libres
 
