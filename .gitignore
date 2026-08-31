@@ -10,3 +10,12 @@ site/
 
 # secrets
 .env
+
+# Rust
+/target/
+**/*.rs.bk
+
+# Python
+__pycache__/
+.pytest_cache/
+.venv/

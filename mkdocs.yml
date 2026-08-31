@@ -42,6 +42,7 @@ nav:
       - LAMULA DRx (movido al sitio del DRx): drx-plan.md
       - LAMULA DSP: dsp-plan.md
       - LAMULA RCP: rcp-plan.md
+  - Contratos de cable: contracts/index.md
   - Algoritmos de procesamiento:
       - Overview: algorithms/index.md
       - Pulse-pair / momentos: algorithms/pulse-pair-moments.md

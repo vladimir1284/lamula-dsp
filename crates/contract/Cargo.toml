@@ -1,0 +1,9 @@
+[package]
+name = "lamula-contract"
+description = "Contratos de cable del LAMULA DSP: DSP↔RCP (propio) y DRx↔DSP (vendorizado)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]

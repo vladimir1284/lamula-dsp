@@ -1,0 +1,3 @@
+# Dependencias de desarrollo. El codegen y los comprobadores usan sólo la
+# librería estándar (tomllib, hashlib, struct): aquí sólo va lo de correr tests.
+pytest==8.4.*

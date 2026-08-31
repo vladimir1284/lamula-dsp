@@ -13,6 +13,11 @@ flowchart LR
 - **[LAMULA DSP](dsp-plan.md)** — procesador de señal headless en Rust sobre Linux SBC: convierte series de tiempo I/Q en momentos meteorológicos (reflectividad, velocidad, ancho espectral), reemplazando el stack Vesta DRX.
 - **[LAMULA RCP](rcp-plan.md)** — Radar Control Processor y MMI del operador: controla el radar, archiva la observación volumétrica como NEXRAD Level-II y alimenta a ORPG vía emulación RDA.
 
+Los formatos de cable que unen esos tres componentes están documentados aparte,
+en **[Contratos de cable](contracts/index.md)**: qué contrato posee cada
+proyecto, cómo se generan las implementaciones de cada lado desde un único
+esquema, y cómo se comprueba que coinciden byte a byte.
+
 ## Referencia de producto líder de mercado
 
 Para subir el nivel de detalle de estos planes se usaron como referencia estructural — **nunca como fuente de texto copiado** — dos manuales de productos líderes:

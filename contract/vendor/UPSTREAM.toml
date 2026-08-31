@@ -1,0 +1,52 @@
+# Procedencia del contrato DRx↔DSP vendorizado.
+#
+# Este fichero es el pin: fija de qué commit del proyecto LAMULA DRx salieron
+# los ficheros de `contract/vendor/` y con qué hash. El contrato lo posee el
+# proyecto DRx (congelado en su fase Z0 por la decisión D-08); aquí sólo se
+# consume. Nada de `contract/vendor/` se edita a mano: si hace falta un cambio
+# de formato, se pide en el proyecto DRx, allí se sube `version_minor`, se
+# regenera con `make gen`, y aquí se re-vendoriza actualizando este pin.
+#
+# `tools/check_vendored_contract.py` falla si un fichero de `vendor/` no
+# coincide con el hash anotado, de modo que una edición local silenciosa no
+# puede pasar el CI.
+
+[upstream]
+project = "lamula-drx"
+repo_path = "../lamula-drx"
+commit = "256e15e0d29a81834a52bdc9b231a9a57f9c0371"
+commit_date = "2026-08-30"
+schema = "contract/schema/drx_dsp_v0_1.toml"
+generator = "tools/gen_contract.py"
+
+[contract]
+name = "drx_dsp"
+version_major = 0
+version_minor = 1
+magic = 0x4C4D4452
+endianness = "little"
+
+# SHA-256 de cada fichero tal y como se copió. La ruta es relativa a este
+# fichero; `source` es la ruta en el repo de origen.
+[[file]]
+path = "drx_dsp_v0_1.rs"
+source = "contract/generated/drx_dsp_v0_1.rs"
+sha256 = "bf353becb05f0032321f2aa9c49d7b6d3b3b505671d9c34a29e3fa6090b173e5"
+role = "Implementación del lado DSP. Se compila dentro del crate de ingesta."
+
+[[file]]
+path = "drx_dsp_v0_1.py"
+source = "contract/generated/drx_dsp_v0_1.py"
+sha256 = "df07d6e188120457dfa48c8edd351af8f360dc7745dac85ff1e0c0ce0da4e1f1"
+role = "Referencia de empaquetado para el banco de pruebas y el simulador de DRx."
+
+# El esquema TOML y la cabecera C no se vendorizan: el DSP no genera código ni
+# compila C contra este contrato. Se anota su hash igualmente para detectar que
+# el origen cambió sin que nadie re-vendorizara.
+[[watch]]
+source = "contract/schema/drx_dsp_v0_1.toml"
+sha256 = "cff6060334c0a58b48275059a2bdc0bbf8db3c50f4ab48bfa73a377f4ca60a75"
+
+[[watch]]
+source = "contract/generated/drx_dsp_v0_1.h"
+sha256 = "f58370bf33237785870300585fcdcbd50ab4a8eca28f2be1ee10167f00f6637c"

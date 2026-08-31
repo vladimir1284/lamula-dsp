@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+
+      # Node hace falta para el test de acuerdo entre lenguajes: compara los
+      # bytes que produce la implementación de Python con los de la de
+      # TypeScript. Sin él ese test se salta y el codegen queda a medio verificar.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Toolchain de Rust
+        run: |
+          rustup toolchain install stable --profile minimal \
+            --component clippy --component rustfmt
+          rustup default stable
+
+      - name: Entorno de Python
+        run: |
+          uv venv .venv
+          uv pip install --python .venv/bin/python -r requirements-dev.txt
+
+      # `check_vendored_contract.py` sólo avisa —no falla— cuando el
+      # repositorio del DRx no está montado al lado, que es siempre el caso en
+      # CI. Lo que sí comprueba aquí es que las copias de `contract/vendor/`
+      # siguen coincidiendo con su ancla por hash.
+      - name: Gates
+        run: make check PY=.venv/bin/python

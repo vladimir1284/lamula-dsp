@@ -1,0 +1,537 @@
+# Contrato DSP↔RCP, v0.1.
+#
+# El plan del DSP (§6) dice que este contrato lo posee este proyecto, al
+# contrario que `DRx↔DSP`, que lo posee el proyecto DRx y aquí sólo se consume
+# (ver `contract/vendor/`). Este fichero es la única fuente de verdad del
+# formato de cable y de él se generan las tres implementaciones: Rust para el
+# DSP, Python para el RCP y el banco de pruebas, TypeScript para el MMI. No se
+# escribe ninguna a mano.
+#
+# Reglas del formato, y en qué se apartan del contrato hermano DRx↔DSP:
+#
+#   * Little-endian, empaquetado, sin relleno implícito. Todo relleno es un
+#     campo con nombre que vale 0. Igual que en DRx↔DSP.
+#   * **Se admite coma flotante**, y aquí está la única divergencia deliberada
+#     respecto al contrato hermano. El DRx prohíbe flotantes porque tiene que
+#     coincidir bit a bit entre el compilador C de un Cortex-R5 y Rust, y los
+#     formatos flotantes no lo garantizan entre arquitecturas. En este enlace
+#     los dos extremos son CPU de propósito general con IEEE-754 (Linux SBC del
+#     lado DSP, servidor del lado RCP), así que esa razón no aplica. A cambio se
+#     gana lo que el plan pide explícitamente: el flujo de momentos viaja «a
+#     precisión plena», y el RCP lo mapea sin copia con `numpy.frombuffer`. La
+#     diezmación a 8/16 bits es cosa del codificador Level-II del RCP, no del
+#     cable.
+#   * Los ángulos viajan en **grados**, no en cuenta cruda de encoder. Al revés
+#     que en DRx↔DSP: allí el DRx no puede convertir porque las constantes de
+#     calibración son del consumidor; aquí el DSP ya las aplicó, y devolver
+#     cuentas crudas obligaría al RCP a duplicar esa calibración.
+#   * Los mensajes de longitud variable son **cabecera fija + carga útil**. La
+#     cabecera dice cuántos elementos vienen detrás; la carga es un array denso.
+#     Ningún mensaje lleva longitud implícita.
+#   * **Dos relojes, nunca un campo llamado `timestamp` a secas.** El RCP tiene
+#     esta regla entre las suyas innegociables y tiene razón: la hora de pared
+#     es lo que NEXRAD exige en el archivo Level-II y lo que ORPG espera, pero
+#     salta cuando alguien disciplina el reloj, así que ordenar radiales o medir
+#     intervalos con ella es incorrecto. Un radial lleva por eso los dos:
+#     `acq_time_utc_ns` (hora de pared, para archivar) y `acq_monotonic_ns`
+#     (monótono del DSP, para ordenar y medir). Los demás mensajes llevan sólo
+#     hora de pared y lo dicen en el nombre del campo, porque los lee un
+#     operador. El reloj monótono NO es comparable entre procesos: al RCP le
+#     sirve para diferencias dentro del mismo flujo, no para casar con los
+#     suyos.
+#
+# Cualquier cambio de formato sube `version_minor` (compatible) o
+# `version_major` (rompe), y actualiza los tests.
+
+[meta]
+name = "dsp_rcp"
+version_major = 0
+version_minor = 1
+magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
+endianness = "little"
+
+# ---------------------------------------------------------------------------
+# Cabecera común a todos los mensajes. Misma forma y mismo tamaño que la de
+# DRx↔DSP a propósito: un solo lector de tramas sirve para los dos enlaces.
+# ---------------------------------------------------------------------------
+[[header.fields]]
+name = "magic"
+type = "u32"
+doc = "0x4C4D4453. Si no coincide, el flujo no es de este contrato."
+
+[[header.fields]]
+name = "version_major"
+type = "u8"
+doc = "Incompatible al cambiar."
+
+[[header.fields]]
+name = "version_minor"
+type = "u8"
+doc = "Compatible hacia atrás dentro del mismo major."
+
+[[header.fields]]
+name = "msg_type"
+type = "u8"
+doc = "Ver la tabla de tipos de mensaje."
+
+[[header.fields]]
+name = "flags"
+type = "u8"
+doc = "Reservado en v0.1; tiene que valer 0."
+
+[[header.fields]]
+name = "payload_len"
+type = "u32"
+doc = """Bytes que siguen a ESTA cabecera de 12 B, contando la cabecera del mensaje
+más su carga útil variable si la tiene. Un lector de tramas hace por tanto: leer
+12 B, leer payload_len B, y ya tiene el mensaje entero sin conocer su tipo. Para
+un moment_ray de 4 celdas y 2 momentos vale 88 + 2·(16 + 4·4) = 152, no 64."""
+
+# ---------------------------------------------------------------------------
+# Mensajes. `dir` es el sentido: "up" del DSP al RCP, "down" del RCP al DSP.
+# ---------------------------------------------------------------------------
+
+[[message]]
+name = "moment_ray"
+type_id = 1
+dir = "up"
+doc = """Un radial de momentos: la observación autoritativa que el RCP archiva
+como Level-II y sirve a ORPG.
+
+Detrás de esta cabecera van `n_moments` bloques, cada uno formado por un
+descriptor `moment_field` de 16 B seguido de `n_gates` valores. El tipo de los
+valores lo dice `moment_field.data_type`; en v0.1 siempre es f32."""
+
+fields = [
+  { name = "seq", type = "u32", doc = "Contador de radiales, envuelve. Detecta pérdidas." },
+  { name = "acq_time_utc_ns", type = "u64", doc = "Instante del primer pulso del radial en hora de pared, ns desde el epoch UTC. Es el que se archiva en Level-II y se sirve a ORPG." },
+  { name = "acq_monotonic_ns", type = "u64", doc = "El mismo instante en el reloj monótono del DSP, ns. Sirve para ordenar y medir intervalos sin que un salto de UTC los corrompa; NO comparable entre procesos." },
+  { name = "volume_seq", type = "u32", doc = "Volumen al que pertenece. Enmarca el archivo Level-II." },
+  { name = "sweep_seq", type = "u16", doc = "Barrido dentro del volumen." },
+  { name = "ray_index", type = "u16", doc = "Radial dentro del barrido." },
+  { name = "n_gates", type = "u16", doc = "Celdas de rango por momento." },
+  { name = "n_pulses", type = "u16", doc = "Pulsos integrados en este radial." },
+  { name = "bins_valid", type = "u16", doc = "Celdas con adquisición correcta. Distinto de que el enlace esté vivo." },
+  { name = "n_moments", type = "u8", doc = "Bloques de momento en la carga útil." },
+  { name = "sweep_mode", type = "u8", doc = "Ver la enumeración de modos de barrido." },
+  { name = "prf_mode", type = "u8", doc = "Ver la enumeración de modos de dealiasing." },
+  { name = "ray_flags", type = "u8", doc = "Ver la tabla de banderas de radial." },
+  { name = "pad0", type = "u16", doc = "Relleno explícito; vale 0." },
+  { name = "az_start_deg", type = "f32", doc = "Azimut al abrir el radial, grados." },
+  { name = "az_end_deg", type = "f32", doc = "Azimut al cerrarlo. Con az_start da el ancho barrido." },
+  { name = "el_start_deg", type = "f32", doc = "Elevación al abrir el radial, grados." },
+  { name = "el_end_deg", type = "f32", doc = "Elevación al cerrarlo, grados." },
+  { name = "fixed_angle_deg", type = "f32", doc = "Ángulo nominal del barrido: elevación en PPI, azimut en RHI." },
+  { name = "start_range_m", type = "f32", doc = "Rango al centro de la primera celda, metros." },
+  { name = "gate_spacing_m", type = "f32", doc = "Separación entre centros de celda, metros." },
+  { name = "prf_hz", type = "f32", doc = "PRF efectiva del radial. En dual-PRF, la media." },
+  { name = "nyquist_velocity", type = "f32", doc = "Velocidad no ambigua tras dealiasing, m/s." },
+  { name = "unambiguous_range_m", type = "f32", doc = "Rango no ambiguo, metros. Es c/(2·PRF) salvo recuperación de trip." },
+  { name = "noise_floor_dbm", type = "f32", doc = "Suelo de ruido vigente al procesar, dBm." },
+  { name = "radar_constant_db", type = "f32", doc = "Constante de radar aplicada, dB. El RCP la necesita para rehacer dBZ." },
+]
+
+[[message]]
+name = "moment_field"
+type_id = 0
+dir = "payload"
+doc = """Descriptor de un momento dentro de la carga útil de un moment_ray.
+
+No viaja suelto: siempre va incrustado, y por eso su type_id es 0. Detrás de
+cada descriptor van `n_gates` valores del tipo que indica `data_type`."""
+
+fields = [
+  { name = "kind", type = "u8", doc = "Qué momento es. Ver la enumeración de momentos." },
+  { name = "data_type", type = "u8", doc = "Codificación de los valores. En v0.1 siempre f32." },
+  { name = "flags", type = "u8", doc = "Ver la tabla de banderas de momento." },
+  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+  { name = "n_gates", type = "u32", doc = "Valores que siguen. Tiene que coincidir con el n_gates del radial." },
+  { name = "scale", type = "f32", doc = "Factor de escala. Vale 1.0 con data_type f32." },
+  { name = "offset", type = "f32", doc = "Desplazamiento. Vale 0.0 con data_type f32." },
+]
+
+[[message]]
+name = "spectrum_frame"
+type_id = 2
+dir = "up"
+doc = """Traza del analizador de espectro de FI. Detrás van `n_bins` valores f32
+en dB, de menor a mayor frecuencia."""
+
+fields = [
+  { name = "seq", type = "u32", doc = "Contador de tramas, envuelve." },
+  { name = "capture_time_utc_ns", type = "u64", doc = "Instante de la captura en hora de pared, ns desde el epoch UTC." },
+  { name = "n_bins", type = "u16", doc = "Puntos de la traza." },
+  { name = "channel", type = "u8", doc = "Canal de recepción al que corresponde." },
+  { name = "flags", type = "u8", doc = "Reservado en v0.1; vale 0." },
+  { name = "center_freq_hz", type = "f32", doc = "Frecuencia central de la traza, Hz." },
+  { name = "span_hz", type = "f32", doc = "Anchura total barrida, Hz." },
+  { name = "ref_level_dbm", type = "f32", doc = "Nivel de referencia, dBm." },
+  { name = "pad0", type = "u32", doc = "Relleno explícito; vale 0." },
+]
+
+[[message]]
+name = "status"
+type_id = 3
+dir = "up"
+doc = """Salud y telemetría. Se emite periódicamente y ante cualquier cambio de
+estado.
+
+Deliberadamente no colapsa en un bit de vivo/muerto: lleva completitud de datos
+(bins_ok frente a bins_total), deriva del periodo de disparo (medido frente a
+mandado) y lectura de suelo de ruido y offset de continua por canal, que son las
+tres cosas que el plan (§6.1) exige poder vigilar por separado."""
+
+fields = [
+  { name = "uptime_s", type = "u32", doc = "Segundos desde el arranque del servicio." },
+  { name = "phase", type = "u8", doc = "Fase vigente: configuración o marcha. Ver la enumeración." },
+  { name = "severity", type = "u8", doc = "Severidad agregada. Ver la enumeración." },
+  { name = "last_error", type = "u8", doc = "Último código de error del plano de control." },
+  { name = "n_rx_channels", type = "u8", doc = "Canales de recepción con lectura válida en este mensaje." },
+  { name = "capability_flags", type = "u32", doc = "Modos de proceso disponibles ahora mismo." },
+  { name = "bite_flags", type = "u32", doc = "Ver la tabla de banderas de BITE." },
+  { name = "config_seq", type = "u32", doc = "`seq` de la configuración vigente. Permite confirmar qué se aplicó." },
+  { name = "rays_in", type = "u32", doc = "Radiales recibidos del DRx." },
+  { name = "rays_out", type = "u32", doc = "Radiales de momentos emitidos al RCP." },
+  { name = "rays_dropped", type = "u32", doc = "Radiales descartados por contrapresión o trama mala." },
+  { name = "queue_depth", type = "u32", doc = "Ocupación de la cola de ingesta, en radiales." },
+  { name = "bins_ok", type = "u32", doc = "Celdas adquiridas correctamente desde el último reset." },
+  { name = "bins_total", type = "u32", doc = "Celdas esperadas en el mismo intervalo." },
+  { name = "trigger_period_cmd_ns", type = "u32", doc = "Periodo de disparo mandado, ns." },
+  { name = "trigger_period_meas_ns", type = "u32", doc = "Periodo de disparo medido, ns. La diferencia es la deriva." },
+  { name = "pad0", type = "u32", doc = "Relleno explícito; vale 0." },
+  { name = "noise_floor_dbm_0", type = "f32", doc = "Suelo de ruido del canal 0, dBm." },
+  { name = "noise_floor_dbm_1", type = "f32", doc = "Suelo de ruido del canal 1, dBm." },
+  { name = "noise_floor_dbm_2", type = "f32", doc = "Suelo de ruido del canal 2, dBm." },
+  { name = "noise_floor_dbm_3", type = "f32", doc = "Suelo de ruido del canal 3, dBm." },
+  { name = "dc_offset_i_0", type = "f32", doc = "Offset de continua en I, canal 0." },
+  { name = "dc_offset_i_1", type = "f32", doc = "Offset de continua en I, canal 1." },
+  { name = "dc_offset_i_2", type = "f32", doc = "Offset de continua en I, canal 2." },
+  { name = "dc_offset_i_3", type = "f32", doc = "Offset de continua en I, canal 3." },
+  { name = "dc_offset_q_0", type = "f32", doc = "Offset de continua en Q, canal 0." },
+  { name = "dc_offset_q_1", type = "f32", doc = "Offset de continua en Q, canal 1." },
+  { name = "dc_offset_q_2", type = "f32", doc = "Offset de continua en Q, canal 2." },
+  { name = "dc_offset_q_3", type = "f32", doc = "Offset de continua en Q, canal 3." },
+]
+
+[[message]]
+name = "bite_event"
+type_id = 4
+dir = "up"
+doc = """Un suceso de BITE con su instante. Detrás van `text_len` bytes UTF-8 de
+texto libre para diagnóstico; el código es lo que se filtra y se historia, el
+texto es para el operador."""
+
+fields = [
+  { name = "event_time_utc_ns", type = "u64", doc = "Instante del suceso en hora de pared, ns desde el epoch UTC. Lo lee un operador, así que nunca es monótono." },
+  { name = "code", type = "u32", doc = "Código del catálogo de fallos." },
+  { name = "value", type = "u32", doc = "Valor asociado; su sentido depende del código." },
+  { name = "severity", type = "u8", doc = "Ver la enumeración de severidad." },
+  { name = "subsystem", type = "u8", doc = "Componente del pipeline que lo emite." },
+  { name = "text_len", type = "u8", doc = "Bytes UTF-8 de texto detrás de la cabecera." },
+  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+]
+
+[[message]]
+name = "config_ack"
+type_id = 5
+dir = "up"
+doc = """Respuesta a un config. `error` distinto de 0 significa que NO se aplicó
+nada y que la configuración anterior sigue vigente."""
+
+fields = [
+  { name = "seq", type = "u32", doc = "El `seq` del config al que responde." },
+  { name = "error", type = "u8", doc = "Código de error; 0 es aceptado." },
+  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+  { name = "pad1", type = "u16", doc = "Relleno explícito; vale 0." },
+]
+
+[[message]]
+name = "selftest_result"
+type_id = 6
+dir = "up"
+doc = """Resultado del autotest de enlace. El plan (§6.1) lo exige en cada
+reconexión del RCP: un apretón de manos TCP no basta para fiarse del enlace
+para control."""
+
+fields = [
+  { name = "seq", type = "u32", doc = "El `seq` de la petición a la que responde." },
+  { name = "nonce", type = "u32", doc = "El nonce de la petición, devuelto tal cual." },
+  { name = "capability_flags", type = "u32", doc = "Modos de proceso disponibles." },
+  { name = "error", type = "u8", doc = "Código de error; 0 es enlace apto para control." },
+  { name = "version_major", type = "u8", doc = "Versión de contrato que habla el DSP." },
+  { name = "version_minor", type = "u8", doc = "Versión de contrato que habla el DSP." },
+  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+]
+
+[[message]]
+name = "capabilities"
+type_id = 7
+dir = "up"
+doc = """Qué sabe hacer esta compilación del DSP. Se responde a un control con
+mandato `request_capabilities`, y es lo que permite al RCP no ofrecer al
+operador un modo que el procesador no implementa."""
+
+fields = [
+  { name = "moment_mask", type = "u32", doc = "Momentos que este DSP puede producir, un bit por momento." },
+  { name = "dealias_mask", type = "u32", doc = "Modos de dealiasing disponibles, un bit por modo." },
+  { name = "estimator_mask", type = "u32", doc = "Estimadores disponibles, un bit por estimador." },
+  { name = "max_gates", type = "u32", doc = "Celdas de rango máximas por radial." },
+  { name = "max_pulses", type = "u16", doc = "Pulsos máximos integrables por radial." },
+  { name = "n_rx_channels", type = "u8", doc = "Canales de recepción que procesa." },
+  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+]
+
+[[message]]
+name = "config"
+type_id = 8
+dir = "down"
+doc = """Configuración completa. Se aplica de forma atómica: o entra entera o se
+rechaza entera y el estado anterior se preserva.
+
+Sólo se acepta en fase de configuración. En marcha se rechaza con
+`not_in_setup_phase`: el plan (§6.1) exige que aplicar configuración y arrancar
+la adquisición sean pasos distintos, y no que la configuración se cuele a mitad
+del flujo."""
+
+fields = [
+  { name = "seq", type = "u32", doc = "Se devuelve tal cual en el config_ack." },
+  { name = "moment_mask", type = "u32", doc = "Momentos a emitir, un bit por momento." },
+  { name = "n_pulses", type = "u16", doc = "Pulsos a integrar por radial." },
+  { name = "n_gates", type = "u16", doc = "Celdas de rango por radial." },
+  { name = "clutter_filter", type = "u8", doc = "Filtro de clutter. Ver la enumeración." },
+  { name = "dealias_mode", type = "u8", doc = "Modo de dealiasing de velocidad. Ver la enumeración." },
+  { name = "sweep_mode", type = "u8", doc = "Modo de barrido. Ver la enumeración." },
+  { name = "estimator", type = "u8", doc = "Estimador de momentos. Ver la enumeración." },
+  { name = "rfi_filter", type = "u8", doc = "Filtrado de interferencia de banda estrecha: 0 no, 1 sí." },
+  { name = "range_dealias", type = "u8", doc = "Recuperación de trip múltiple: 0 no, 1 sí." },
+  { name = "prf_ratio_num", type = "u8", doc = "Numerador de la razón dual-PRF; 0 si no aplica." },
+  { name = "prf_ratio_den", type = "u8", doc = "Denominador de la razón dual-PRF; 0 si no aplica." },
+  { name = "start_range_m", type = "f32", doc = "Rango de la primera celda, metros." },
+  { name = "gate_spacing_m", type = "f32", doc = "Separación entre celdas, metros. Fija el tamaño de celda." },
+  { name = "prf_hz", type = "f32", doc = "PRF pedida, Hz. Se valida contra la extensión de rango." },
+  { name = "sqi_threshold", type = "f32", doc = "Umbral de SQI por debajo del cual se censura la celda." },
+  { name = "sig_threshold", type = "f32", doc = "Umbral de señal sobre ruido, dB." },
+  { name = "ccor_threshold", type = "f32", doc = "Umbral de corrección de clutter, dB." },
+  { name = "log_threshold", type = "f32", doc = "Umbral logarítmico de potencia, dB." },
+  { name = "clutter_width_ms", type = "f32", doc = "Anchura espectral asumida del clutter, m/s." },
+  { name = "radar_constant_db", type = "f32", doc = "Constante de radar, dB." },
+  { name = "noise_floor_dbm", type = "f32", doc = "Suelo de ruido de referencia, dBm." },
+  { name = "receiver_gain_db", type = "f32", doc = "Ganancia del receptor, dB." },
+  { name = "zdr_offset_db", type = "f32", doc = "Corrección de sesgo de ZDR, dB." },
+  { name = "phidp_offset_deg", type = "f32", doc = "Fase diferencial del sistema a restar, grados." },
+  { name = "wavelength_m", type = "f32", doc = "Longitud de onda, metros. Escala la velocidad." },
+  { name = "pad0", type = "u32", doc = "Relleno explícito; vale 0." },
+]
+
+[[message]]
+name = "control"
+type_id = 9
+dir = "down"
+doc = "Mandato del plano de control. Se responde siempre con un config_ack."
+
+fields = [
+  { name = "seq", type = "u32", doc = "Se devuelve tal cual en el config_ack." },
+  { name = "command", type = "u8", doc = "Ver la enumeración de mandatos." },
+  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+  { name = "pad1", type = "u16", doc = "Relleno explícito; vale 0." },
+]
+
+[[message]]
+name = "selftest_request"
+type_id = 10
+dir = "down"
+doc = "Arranca el autotest de enlace. Obligatorio en cada reconexión del RCP."
+
+fields = [
+  { name = "seq", type = "u32", doc = "Se devuelve tal cual en el selftest_result." },
+  { name = "nonce", type = "u32", doc = "Valor arbitrario que el DSP devuelve, para casar respuesta con petición." },
+]
+
+# ---------------------------------------------------------------------------
+# Enumeraciones.
+# ---------------------------------------------------------------------------
+
+[[enum]]
+name = "error"
+type = "u8"
+doc = "Códigos de rechazo del plano de control."
+values = [
+  { name = "ok", value = 0, doc = "Aceptado." },
+  { name = "unsupported_version", value = 1, doc = "version_major desconocido." },
+  { name = "unknown_message", value = 2, doc = "msg_type desconocido." },
+  { name = "bad_length", value = 3, doc = "payload_len no cuadra con el mensaje." },
+  { name = "not_in_setup_phase", value = 4, doc = "Llegó un config estando en marcha." },
+  { name = "not_configured", value = 5, doc = "Llegó un arranque antes de la primera configuración." },
+  { name = "moment_unsupported", value = 6, doc = "Se pidió un momento que esta compilación no produce." },
+  { name = "dealias_unsupported", value = 7, doc = "Se pidió un modo de dealiasing no disponible." },
+  { name = "estimator_unsupported", value = 8, doc = "Se pidió un estimador no disponible." },
+  { name = "threshold_out_of_range", value = 9, doc = "Un umbral cae fuera de su rango admisible." },
+  { name = "prf_range_illegal", value = 10, doc = "PRF y extensión de rango incompatibles; ver D-09 del DRx." },
+  { name = "gate_count_illegal", value = 11, doc = "n_gates por encima de max_gates." },
+  { name = "selftest_failed", value = 12, doc = "El autotest de enlace no pasó." },
+  { name = "drx_link_down", value = 13, doc = "No hay enlace con el DRx; no se puede arrancar." },
+]
+
+[[enum]]
+name = "moment_kind"
+type = "u8"
+doc = """Vocabulario canónico de momentos, común a los planes del DSP y del RCP.
+Reconcilia el nombrado heredado de Vesta (dBZ/dBT) con el del RCP (UZ/CZ)."""
+values = [
+  { name = "uz", value = 0, doc = "Reflectividad sin corregir, dBZ." },
+  { name = "cz", value = 1, doc = "Reflectividad corregida, dBZ." },
+  { name = "v", value = 2, doc = "Velocidad radial media, m/s." },
+  { name = "w", value = 3, doc = "Ancho espectral, m/s." },
+  { name = "zdr", value = 4, doc = "Reflectividad diferencial, dB." },
+  { name = "phidp", value = 5, doc = "Fase diferencial, grados." },
+  { name = "kdp", value = 6, doc = "Fase diferencial específica, grados/km." },
+  { name = "ldr", value = 7, doc = "Razón de despolarización lineal, dB." },
+  { name = "rhohv", value = 8, doc = "Coeficiente de correlación copolar, adimensional." },
+  { name = "sqi", value = 9, doc = "Índice de calidad de señal, 0 a 1." },
+  { name = "ccor", value = 10, doc = "Corrección de clutter aplicada, dB." },
+  { name = "sig", value = 11, doc = "Señal sobre ruido, dB." },
+  { name = "i", value = 12, doc = "Componente en fase cruda." },
+  { name = "q", value = 13, doc = "Componente en cuadratura cruda." },
+]
+
+[[enum]]
+name = "ray_flag"
+type = "u8"
+doc = "Banderas por radial. Un radial con problemas se MARCA, no se descarta."
+values = [
+  { name = "sweep_start", value = 1, doc = "Primer radial del barrido." },
+  { name = "sweep_end", value = 2, doc = "Último radial del barrido." },
+  { name = "volume_start", value = 4, doc = "Primer radial del volumen." },
+  { name = "volume_end", value = 8, doc = "Último radial del volumen. Cierra el fichero Level-II." },
+  { name = "censored", value = 16, doc = "Alguna celda quedó censurada por umbral." },
+  { name = "dealias_failed", value = 32, doc = "El dealiasing no convergió en este radial." },
+  { name = "clutter_filtered", value = 64, doc = "Se aplicó filtrado de clutter." },
+  { name = "first_after_config", value = 128, doc = "Primer radial con la configuración nueva." },
+]
+
+[[enum]]
+name = "moment_flag"
+type = "u8"
+doc = "Banderas por bloque de momento dentro de un radial."
+values = [
+  { name = "has_missing", value = 1, doc = "El bloque contiene celdas sin dato, codificadas como NaN." },
+  { name = "corrected", value = 2, doc = "El momento lleva correcciones de calibración aplicadas." },
+  { name = "filtered", value = 4, doc = "El momento se calculó tras el filtro de clutter." },
+]
+
+[[enum]]
+name = "phase"
+type = "u8"
+doc = "Fases del DSP. Configurar y adquirir son pasos distintos."
+values = [
+  { name = "setup", value = 0, doc = "Admite configuración; no emite momentos." },
+  { name = "running", value = 1, doc = "Emite momentos; rechaza configuración." },
+  { name = "fault", value = 2, doc = "Parado por fallo; sólo admite status y autotest." },
+]
+
+[[enum]]
+name = "command"
+type = "u8"
+doc = "Mandatos del plano de control."
+values = [
+  { name = "enter_setup", value = 0, doc = "Para la adquisición y vuelve a fase de configuración." },
+  { name = "start", value = 1, doc = "Pasa a marcha con la configuración vigente." },
+  { name = "stop", value = 2, doc = "Para la adquisición sin perder la configuración." },
+  { name = "request_status", value = 3, doc = "Pide un status inmediato." },
+  { name = "request_config", value = 4, doc = "Pide de vuelta la configuración vigente." },
+  { name = "request_capabilities", value = 5, doc = "Pide el mensaje de capacidades." },
+  { name = "reset_counters", value = 6, doc = "Pone a cero los contadores de telemetría." },
+]
+
+[[enum]]
+name = "sweep_mode"
+type = "u8"
+doc = "Modos de barrido."
+values = [
+  { name = "ppi", value = 0, doc = "Azimut variable a elevación fija." },
+  { name = "rhi", value = 1, doc = "Elevación variable a azimut fijo." },
+  { name = "sector", value = 2, doc = "Sector de azimut acotado." },
+  { name = "point", value = 3, doc = "Antena parada en una posición." },
+  { name = "manual", value = 4, doc = "Movimiento gobernado por el operador." },
+]
+
+[[enum]]
+name = "dealias_mode"
+type = "u8"
+doc = "Modos de extensión del intervalo de velocidad no ambigua."
+values = [
+  { name = "none", value = 0, doc = "PRF único; Nyquist sin extender." },
+  { name = "dual_prf", value = 1, doc = "PRF alternante por radial." },
+  { name = "staggered_prt", value = 2, doc = "Periodo escalonado dentro del radial." },
+]
+
+[[enum]]
+name = "estimator"
+type = "u8"
+doc = "Estimadores de momentos."
+values = [
+  { name = "pulse_pair", value = 0, doc = "Autocovarianza a retardo 1. Primario." },
+  { name = "spectral", value = 1, doc = "FFT y ajuste espectral. Alternativo, más caro." },
+]
+
+[[enum]]
+name = "clutter_filter"
+type = "u8"
+doc = "Filtros de eco fijo."
+values = [
+  { name = "none", value = 0, doc = "Sin filtrar." },
+  { name = "gmap", value = 1, doc = "GMAP: ajuste gaussiano e interpolación del hueco." },
+  { name = "notch", value = 2, doc = "Notch fijo en velocidad cero." },
+]
+
+[[enum]]
+name = "data_type"
+type = "u8"
+doc = "Codificación de los valores de un bloque de momento."
+values = [
+  { name = "f32", value = 0, doc = "IEEE-754 de 32 bits. Único tipo en v0.1." },
+  { name = "i16_scaled", value = 1, doc = "Reservado: entero de 16 bits con scale y offset." },
+]
+
+[[enum]]
+name = "severity"
+type = "u8"
+doc = "Niveles de severidad, comunes a status y a los sucesos de BITE."
+values = [
+  { name = "info", value = 0, doc = "Informativo; no degrada el servicio." },
+  { name = "warning", value = 1, doc = "Degradación que no impide operar." },
+  { name = "fault", value = 2, doc = "Fallo que impide producir momentos válidos." },
+  { name = "config_error", value = 3, doc = "La configuración vigente es inconsistente." },
+]
+
+[[enum]]
+name = "capability_flag"
+type = "u32"
+doc = "Modos de proceso que una compilación del DSP puede ofrecer."
+values = [
+  { name = "dual_pol", value = 1, doc = "Estimadores polarimétricos disponibles." },
+  { name = "spectral_estimator", value = 2, doc = "Estimador espectral disponible." },
+  { name = "dual_prf", value = 4, doc = "Dealiasing dual-PRF disponible." },
+  { name = "staggered_prt", value = 8, doc = "Dealiasing por PRT escalonado disponible." },
+  { name = "range_dealias", value = 16, doc = "Recuperación de trip múltiple disponible." },
+  { name = "rfi_filter", value = 32, doc = "Filtrado de interferencia de banda estrecha disponible." },
+  { name = "spectrum_feed", value = 64, doc = "Analizador de espectro de FI disponible." },
+  { name = "iq_archive", value = 128, doc = "Volcado de series temporales crudas disponible." },
+]
+
+[[enum]]
+name = "bite_flag"
+type = "u32"
+doc = "Catálogo de fallos del DSP."
+values = [
+  { name = "ingest_drop", value = 1, doc = "Se perdieron radiales del DRx." },
+  { name = "queue_overflow", value = 2, doc = "La cola de ingesta se desbordó." },
+  { name = "drx_link_down", value = 4, doc = "Enlace con el DRx caído." },
+  { name = "drx_config_rejected", value = 8, doc = "El DRx rechazó una configuración." },
+  { name = "trigger_drift", value = 16, doc = "El periodo de disparo medido se apartó del mandado." },
+  { name = "noise_floor_drift", value = 32, doc = "El suelo de ruido se apartó del calibrado." },
+  { name = "moment_overrun", value = 64, doc = "La estimación de momentos no siguió el ritmo de radiales." },
+  { name = "calibration_stale", value = 128, doc = "La calibración lleva demasiado sin verificarse." },
+  { name = "rcp_link_down", value = 256, doc = "Enlace con el RCP caído." },
+  { name = "archive_full", value = 512, doc = "Sin espacio para el archivo de I/Q crudo." },
+]
