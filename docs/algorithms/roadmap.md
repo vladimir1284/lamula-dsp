@@ -135,8 +135,11 @@ ajuste gaussiano por mínimos cuadrados y degradación explícita a notch, y el
 clasificador de persistencia potencia/CV temporal para la generación del
 mapa) y para [filtrado de RFI](rfi-filtrado.md) (`crates/rfi`: detección por
 exceso sobre la mediana más anchura angosta, interpolación reutilizando sin
-reimplementar el `gmap_filter` de `crates/clutter`). Están pendientes en el
-resto de algoritmos de fase 2 en adelante (dual-PRF, staggered-PRT).
+reimplementar el `gmap_filter` de `crates/clutter`) y para
+[dual-PRF](dual-prf-dealiasing.md) (`crates/dual-prf`: desdoblado por
+teorema chino del resto sobre velocidades pulse-pair y corrección por
+continuidad espacial). Está pendiente
+[staggered-PRT](staggered-prt.md), el último algoritmo de fase 2.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,

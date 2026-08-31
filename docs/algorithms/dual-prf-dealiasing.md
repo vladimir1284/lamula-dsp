@@ -1,6 +1,6 @@
 # Dealiasing Dual-PRF
 
-> **Oráculo en Python**: [`tools/oracles/dual_prf_dealiasing.ipynb`](../../tools/oracles/dual_prf_dealiasing.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/dual_prf_dealiasing.ipynb`](../../tools/oracles/dual_prf_dealiasing.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/dual-prf`: desdoblado por teorema chino del resto sobre velocidades pulse-pair ya calculadas, y corrección por continuidad espacial, contrastada numéricamente contra el oráculo en `crates/dual-prf/tests/against_oracle.rs`. El oráculo documenta un hallazgo estructural del esquema 2:3, no un defecto de esta implementación: en torno al 88% de la Nyquist extendida hay un empate entre dos múltiplos de plegado que ni SNR alta resuelve, razón por la que la continuidad espacial no es opcional.
 
 ## Qué resuelve
 

@@ -61,6 +61,16 @@ name = "lamula-contract"
 version = "0.1.0"
 
 [[package]]
+name = "lamula-dual-prf"
+version = "0.1.0"
+dependencies = [
+ "lamula-moments",
+ "lamula-simulator",
+ "rand",
+ "rand_distr",
+]
+
+[[package]]
 name = "lamula-moments"
 version = "0.1.0"
 dependencies = [
