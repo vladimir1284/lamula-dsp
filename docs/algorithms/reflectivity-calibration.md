@@ -1,6 +1,6 @@
 # Calibración de Reflectividad
 
-> **Oráculo en Python**: [`tools/oracles/reflectivity_calibration.ipynb`](../../tools/oracles/reflectivity_calibration.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/reflectivity_calibration.ipynb`](../../tools/oracles/reflectivity_calibration.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/calibration`: conversión potencia↔dBZ con constante de radar y corrección por r², contrastada numéricamente contra el oráculo en `crates/calibration/tests/against_oracle.rs`.
 
 ## Qué resuelve
 

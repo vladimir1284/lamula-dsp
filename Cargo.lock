@@ -26,6 +26,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-calibration"
+version = "0.1.0"
+dependencies = [
+ "lamula-noise",
+ "lamula-simulator",
+ "rand",
+]
+
+[[package]]
 name = "lamula-contract"
 version = "0.1.0"
 
