@@ -4,14 +4,14 @@
 #
 #   make check   todo lo que corre el CI
 #   make gen     regenera el contrato DSP↔RCP desde su esquema
-#   make test    sólo los tests (Rust + Python)
+#   make test    sólo los tests (Rust + Python + notebooks de oráculo)
 #   make fmt     formatea las fuentes propias de Rust
 #   make clean
 
 PY ?= python3
 CARGO ?= cargo
 
-.PHONY: check gen lint test test-rust test-py fmt clean
+.PHONY: check gen lint test test-rust test-py test-oracles fmt clean
 
 gen:
 	$(PY) tools/gen_contract.py
@@ -32,7 +32,15 @@ test-rust:
 test-py:
 	$(PY) -m pytest contract/tests -q
 
-test: test-rust test-py
+# Ejecuta de punta a punta cada notebook de oráculo (docs/algorithms/
+# roadmap.md §"Método de estudio"): una celda que lanza AssertionError hace
+# fallar nbconvert y por tanto el gate, no sólo se comprueba que el fichero
+# parsee.
+test-oracles:
+	$(PY) -m jupyter nbconvert --to notebook --execute --stdout \
+		tools/oracles/*.ipynb > /dev/null
+
+test: test-rust test-py test-oracles
 
 # rustfmt sólo sobre las fuentes propias. `cargo fmt` a secas también vale
 # gracias al `rustfmt::skip` de la declaración del módulo vendorizado, pero

@@ -1,3 +1,12 @@
 # Dependencias de desarrollo. El codegen y los comprobadores usan sólo la
 # librería estándar (tomllib, hashlib, struct): aquí sólo va lo de correr tests.
 pytest==8.4.*
+
+# Arnés de oráculo en Python (docs/algorithms/roadmap.md §"Método de
+# estudio"): los notebooks de tools/oracles/ se ejecutan de punta a punta en
+# CI con nbconvert, no sólo se leen.
+numpy==2.*
+scipy==1.*
+matplotlib==3.*
+nbconvert==7.*
+ipykernel==6.*
