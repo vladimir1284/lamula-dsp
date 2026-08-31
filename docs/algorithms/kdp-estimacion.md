@@ -1,5 +1,7 @@
 # Estimación de KDP
 
+> **Oráculo en Python**: [`tools/oracles/kdp_estimacion.ipynb`](../../tools/oracles/kdp_estimacion.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 KDP —la fase diferencial específica, en grados por kilómetro— es la derivada

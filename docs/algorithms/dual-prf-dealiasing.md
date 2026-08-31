@@ -1,5 +1,7 @@
 # Dealiasing Dual-PRF
 
+> **Oráculo en Python**: [`tools/oracles/dual_prf_dealiasing.ipynb`](../../tools/oracles/dual_prf_dealiasing.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 La velocidad radial que un radar Doppler puede medir sin ambigüedad está acotada por la velocidad de Nyquist, `v_N = λ / (4·PRT)`, donde λ es la longitud de onda y PRT el período entre pulsos. Para PRTs típicos de vigilancia meteorológica de largo alcance, `v_N` suele quedar entre 8 y 20 m/s — muy por debajo de velocidades radiales reales en convección severa. Toda velocidad que exceda `v_N` se "pliega" (aliasing): se mide un valor erróneo desplazado en múltiplos de `2·v_N`. Subir el PRF para ampliar `v_N` reduce a su vez el rango no ambiguo (`r_max = c·PRT/2`), así que hay un compromiso directo rango-velocidad que un único PRF no puede resolver por sí solo.

@@ -1,5 +1,7 @@
 # Filtrado de interferencia de banda estrecha (RFI)
 
+> **Oráculo en Python**: [`tools/oracles/rfi_filtrado.ipynb`](../../tools/oracles/rfi_filtrado.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 La banda de un radar meteorológico está compartida. En banda C y sobre todo en

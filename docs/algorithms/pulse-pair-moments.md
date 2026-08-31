@@ -1,5 +1,7 @@
 # Pulse-Pair y Estimación de Momentos
 
+> **Oráculo en Python**: [`tools/oracles/pulse_pair_moments.ipynb`](../../tools/oracles/pulse_pair_moments.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 Un radar meteorológico Doppler transmite una ráfaga de pulsos por rayo y recibe, para cada celda de rango, una serie temporal de muestras complejas I/Q (una por pulso). De esa serie hay que extraer tres cantidades físicas por celda: la potencia recibida (de la que se deriva la reflectividad Z), la velocidad radial media (efecto Doppler) y el ancho espectral (dispersión de velocidades dentro del volumen de resolución, ligada a turbulencia y cizalladura). El método clásico y computacionalmente más económico para estimar estas tres cantidades es el **estimador pulse-pair**, también llamado estimador de autocovarianza de retardo 1.

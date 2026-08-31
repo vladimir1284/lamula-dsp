@@ -1,5 +1,7 @@
 # Analizador de espectro de FI
 
+> **Oráculo en Python**: [`tools/oracles/analizador_espectro_fi.ipynb`](../../tools/oracles/analizador_espectro_fi.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 El operador y el técnico de mantenimiento necesitan ver el espectro de la señal

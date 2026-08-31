@@ -1,5 +1,7 @@
 # Filtrado de Clutter GMAP
 
+> **Oráculo en Python**: [`tools/oracles/gmap_clutter_filtering.ipynb`](../../tools/oracles/gmap_clutter_filtering.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 El eco de terreno fijo ("ground clutter") aparece en el espectro Doppler concentrado alrededor de velocidad radial cero, con una potencia típicamente muy superior a la de la señal meteorológica cercana. Un filtro de clutter debe eliminar esa componente sin distorsionar la señal meteorológica que, por coincidencia geométrica, también tenga velocidad radial cercana a cero (por ejemplo, precipitación moviéndose tangencialmente al haz). Los filtros clásicos de muesca (notch filters, IIR de orden bajo) simplemente anulan una banda fija alrededor de cero Hz; son baratos pero destruyen toda la señal meteorológica que caiga dentro de esa banda, sesgando la reflectividad y la velocidad estimadas cerca de v=0.

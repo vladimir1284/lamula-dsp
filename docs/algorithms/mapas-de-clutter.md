@@ -1,5 +1,7 @@
 # Mapas de clutter
 
+> **Oráculo en Python**: [`tools/oracles/mapas_de_clutter.ipynb`](../../tools/oracles/mapas_de_clutter.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 El eco de terreno no está repartido al azar: está donde están las montañas, los

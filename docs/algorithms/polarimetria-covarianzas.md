@@ -1,5 +1,7 @@
 # Variables polarimétricas: ZDR, ρHV, ΦDP y LDR
 
+> **Oráculo en Python**: [`tools/oracles/polarimetria_covarianzas.ipynb`](../../tools/oracles/polarimetria_covarianzas.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 Un radar de canal único mide cuánta potencia devuelve un volumen y a qué

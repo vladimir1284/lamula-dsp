@@ -1,5 +1,7 @@
 # Simulador de I/Q con momentos prescritos
 
+> **Oráculo en Python**: [`tools/oracles/simulador_iq.ipynb`](../../tools/oracles/simulador_iq.ipynb) — derivado del paper, no del código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/simulator`.
+
 ## Qué resuelve
 
 Toda la aceptación del LAMULA DSP en el mes 8 se hace contra el simulador de

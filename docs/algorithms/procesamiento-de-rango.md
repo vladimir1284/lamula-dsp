@@ -1,5 +1,7 @@
 # Procesamiento de rango y modos de barrido
 
+> **Oráculo en Python**: [`tools/oracles/procesamiento_de_rango.ipynb`](../../tools/oracles/procesamiento_de_rango.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 Entre la serie temporal cruda que entrega el DRx y el radial de momentos que

@@ -1,5 +1,7 @@
 # Calibración de Reflectividad
 
+> **Oráculo en Python**: [`tools/oracles/reflectivity_calibration.ipynb`](../../tools/oracles/reflectivity_calibration.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 La reflectividad meteorológica (Z, en dBZ) que reportan los productos de un radar no es una medida directa: se deriva de la potencia recibida por celda de rango aplicando la ecuación del radar meteorológico, que depende de constantes del sistema (potencia transmitida, ganancia de antena, ancho de haz, longitud de pulso, pérdidas de la cadena RF, ganancia del receptor) y del rango a la celda. Un error de calibración de solo 1 dB en la cadena se traduce directamente en 1 dB de error en Z, que a su vez puede traducirse en errores de varias veces en la tasa de precipitación estimada (Z-R es una ley de potencia). Por eso la calibración de reflectividad — y su verificación continua en operación — es uno de los procesos de mayor impacto operativo de todo el pipeline, aunque no sea un "algoritmo" único sino una cadena de procedimientos.

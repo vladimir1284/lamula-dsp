@@ -1,5 +1,7 @@
 # Dealiasing de rango: ecos de trip múltiple
 
+> **Oráculo en Python**: [`tools/oracles/dealiasing_de_rango.ipynb`](../../tools/oracles/dealiasing_de_rango.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 A PRF alta, los ecos que llegan de más allá del rango no ambiguo `r_max = c·PRT/2`

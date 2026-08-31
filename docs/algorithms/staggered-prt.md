@@ -1,5 +1,7 @@
 # Staggered-PRT
 
+> **Oráculo en Python**: [`tools/oracles/staggered_prt.ipynb`](../../tools/oracles/staggered_prt.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 Es la segunda vía para romper el compromiso entre rango no ambiguo y velocidad

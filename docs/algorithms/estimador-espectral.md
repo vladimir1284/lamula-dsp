@@ -1,5 +1,7 @@
 # Estimador espectral de momentos
 
+> **Oráculo en Python**: [`tools/oracles/estimador_espectral.ipynb`](../../tools/oracles/estimador_espectral.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 El [pulse-pair](pulse-pair-moments.md) es barato y suficiente cuando el espectro

@@ -1,5 +1,7 @@
 # Calibración polarimétrica: ZDR y ΦDP de sistema
 
+> **Oráculo en Python**: [`tools/oracles/calibracion_polarimetrica.ipynb`](../../tools/oracles/calibracion_polarimetrica.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 La [calibración de reflectividad](reflectivity-calibration.md) persigue exactitud

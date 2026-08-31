@@ -1,5 +1,7 @@
 # Burst de transmisión, corrección de fase y AFC
 
+> **Oráculo en Python**: [`tools/oracles/burst_fase_afc.ipynb`](../../tools/oracles/burst_fase_afc.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 Un estimador Doppler mide el cambio de fase del eco entre pulsos consecutivos.

@@ -1,5 +1,7 @@
 # Índices de calidad: SQI, CCOR y SIG
 
+> **Oráculo en Python**: [`tools/oracles/indices_de_calidad.ipynb`](../../tools/oracles/indices_de_calidad.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 Un momento sin índice de calidad es un número sin contexto: el consumidor no

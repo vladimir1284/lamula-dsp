@@ -102,6 +102,16 @@ entre algoritmos.
 | 3 → M3 (W19–27) | [Covarianzas polarimétricas](polarimetria-covarianzas.md); [KDP](kdp-estimacion.md); [calibración polarimétrica](calibracion-polarimetrica.md); [dealiasing de rango](dealiasing-de-rango.md); [analizador de espectro de FI](analizador-espectro-fi.md) |
 | 4 → M4 (W28–34) | Validación de exactitud contra varianza teórica y regresión Vesta; gates de rendimiento |
 
+**Estado del paso 1 del método (oráculo en Python).** Completo para todo el
+trabajo de fase 0 a fase 3: cada algoritmo de la tabla —salvo el kernel
+numérico, que no tiene fórmula propia que oracular, y salvo
+[SZ(8/64)](sz-second-trip-recovery.md), diferido a Stage 2 por su propia
+página— tiene su notebook en `tools/oracles/`, enlazado desde la página del
+algoritmo correspondiente, ejecutable de punta a punta con `make
+test-oracles`. El paso 2 (implementación en Rust) y el paso 3 (test de
+contraste numérico) están pendientes en todos los casos salvo el simulador
+de I/Q (`crates/simulator`).
+
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,
 la corrección de fase es prerrequisito duro del pulse-pair —sin ella la serie

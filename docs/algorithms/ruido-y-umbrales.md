@@ -1,5 +1,7 @@
 # Ruido, resta de ruido y umbrales de censura
 
+> **Oráculo en Python**: [`tools/oracles/ruido_y_umbrales.ipynb`](../../tools/oracles/ruido_y_umbrales.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+
 ## Qué resuelve
 
 Toda celda de rango contiene, además del eco, ruido térmico del receptor. A SNR
