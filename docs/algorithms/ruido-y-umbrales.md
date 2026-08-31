@@ -1,6 +1,6 @@
 # Ruido, resta de ruido y umbrales de censura
 
-> **Oráculo en Python**: [`tools/oracles/ruido_y_umbrales.ipynb`](../../tools/oracles/ruido_y_umbrales.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust pendiente.
+> **Oráculo en Python**: [`tools/oracles/ruido_y_umbrales.ipynb`](../../tools/oracles/ruido_y_umbrales.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/noise`: estimación HS74, resta y censura por `sig_threshold`, contrastada numéricamente contra el oráculo en `crates/noise/tests/against_oracle.rs`. Medida directa en intervalo pasivo, estimación por radial de Ivić et al. (2013), y censura por `log_threshold`/`sqi_threshold`/`ccor_threshold` quedan pendientes (no tienen oráculo todavía, o dependen de otros algoritmos).
 
 ## Qué resuelve
 

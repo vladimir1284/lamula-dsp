@@ -109,8 +109,10 @@ numérico, que no tiene fórmula propia que oracular, y salvo
 página— tiene su notebook en `tools/oracles/`, enlazado desde la página del
 algoritmo correspondiente, ejecutable de punta a punta con `make
 test-oracles`. El paso 2 (implementación en Rust) y el paso 3 (test de
-contraste numérico) están pendientes en todos los casos salvo el simulador
-de I/Q (`crates/simulator`).
+contraste numérico) están hechos para el simulador de I/Q (`crates/simulator`)
+y para la mitad con oráculo de [ruido y umbrales](ruido-y-umbrales.md)
+(`crates/noise`: estimación HS74, resta, censura por `sig_threshold`); están
+pendientes en el resto de algoritmos.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,

@@ -30,6 +30,15 @@ name = "lamula-contract"
 version = "0.1.0"
 
 [[package]]
+name = "lamula-noise"
+version = "0.1.0"
+dependencies = [
+ "lamula-simulator",
+ "rand",
+ "rustfft",
+]
+
+[[package]]
 name = "lamula-simulator"
 version = "0.1.0"
 dependencies = [
