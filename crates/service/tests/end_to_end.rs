@@ -12,7 +12,7 @@ use std::net::TcpListener as StdTcpListener;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
-use lamula_contract::dsp_rcp::{self, Config, Control, HEADER_SIZE, MAGIC, MsgType};
+use lamula_contract::dsp_rcp::{self, Config, Control, MsgType, HEADER_SIZE, MAGIC};
 use lamula_simulator::{generate_cell, pack_rays, CellParams, RayHeaderFields};
 use rand::rngs::StdRng;
 use rand::SeedableRng;

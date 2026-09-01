@@ -34,6 +34,19 @@ pub enum PulsePairFlag {
 pub struct PulsePairEstimate {
     /// `S = max(mean(|s|²) - N̂, 0)`, potencia lineal con ruido restado.
     pub s_linear: f64,
+    /// `R̂(0) = mean(|s|²)`, potencia total *sin* restar ruido. La expone
+    /// este estimador (no sólo `s_linear`) porque SQI se define sobre ella,
+    /// no sobre la señal ya recortada — ver `docs/algorithms/indices-de-calidad.md`
+    /// §"SQI" y `lamula_quality::sqi`.
+    pub r0_raw: f64,
+    /// `|R̂(1)|`, módulo de la autocovarianza a retardo 1: el numerador de
+    /// SQI (`lamula_quality::sqi`).
+    pub r1_abs: f64,
+    /// `N̂`, el suelo de ruido HS74 estimado sobre esta misma ráfaga —
+    /// el que de hecho se restó para obtener `s_linear`. Lo expone este
+    /// estimador para que SIG (`lamula_quality::sig_db`) se calcule con el
+    /// mismo `N̂`, no con un valor distinto.
+    pub noise_floor_estimate: f64,
     /// `V = -(λ/4πT)·arg(R̂(1))`, m/s.
     pub velocity_mps: f64,
     /// Ancho espectral, m/s. `None` cuando `flag == Censored`; `Some(0.0)`
@@ -62,19 +75,27 @@ pub fn pulse_pair_moments(y: &[Complex64], wavelength_m: f64, prt_s: f64) -> Pul
     r1 /= (y.len() - 1) as f64;
     let velocity_mps = -wavelength_m / (4.0 * PI * prt_s) * r1.arg();
 
+    let r1_abs = r1.norm();
+
     if s_linear <= 0.0 {
         return PulsePairEstimate {
             s_linear,
+            r0_raw,
+            r1_abs,
+            noise_floor_estimate: n_hat,
             velocity_mps,
             spectrum_width_mps: None,
             flag: PulsePairFlag::Censored,
         };
     }
 
-    let ratio = r1.norm() / s_linear;
+    let ratio = r1_abs / s_linear;
     if ratio >= 1.0 {
         return PulsePairEstimate {
             s_linear,
+            r0_raw,
+            r1_abs,
+            noise_floor_estimate: n_hat,
             velocity_mps,
             spectrum_width_mps: Some(0.0),
             flag: PulsePairFlag::Saturated,
@@ -85,6 +106,9 @@ pub fn pulse_pair_moments(y: &[Complex64], wavelength_m: f64, prt_s: f64) -> Pul
         wavelength_m / (2.0 * PI * prt_s * 2.0f64.sqrt()) * (-ratio.ln()).sqrt();
     PulsePairEstimate {
         s_linear,
+        r0_raw,
+        r1_abs,
+        noise_floor_estimate: n_hat,
         velocity_mps,
         spectrum_width_mps: Some(spectrum_width_mps),
         flag: PulsePairFlag::Ok,

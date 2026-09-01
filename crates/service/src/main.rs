@@ -16,15 +16,19 @@
 //!
 //! Alcance honesto — lo que este binario deliberadamente NO hace, porque
 //! nada en este workspace lo respalda todavía:
-//! - Sólo produce UZ (reflectividad sin corregir) y V (velocidad), vía
-//!   `lamula_moments::pulse_pair_moments` sobre el canal 0: es el mismo par
-//!   que cierra el hito M1 en el vertical slice. `capabilities` sólo
-//!   anuncia esos dos momentos y el estimador pulse-pair — cualquier otro
-//!   bit de `moment_mask` en un `config` se rechaza como
-//!   `moment_unsupported` antes de llegar aquí
-//!   (`lamula_rcp_link::validate::validate_config`). Los crates de
-//!   polarimetría/KDP/calidad/dealiasing/clutter que sí existen en el
-//!   workspace no están conectados a este binario.
+//! - Sólo produce UZ (reflectividad sin corregir), V (velocidad), SQI y SIG
+//!   (`crate::ray`, sobre `lamula_moments::pulse_pair_moments` y
+//!   `lamula_quality`), todo sobre el canal 0. `capabilities` sólo anuncia
+//!   esos cuatro momentos y el estimador pulse-pair — cualquier otro bit de
+//!   `moment_mask` en un `config` se rechaza como `moment_unsupported`
+//!   antes de llegar aquí (`lamula_rcp_link::validate::validate_config`).
+//!   No hay CCOR porque no hay filtro de clutter conectado a este binario
+//!   (el crate `lamula-clutter` existe en el workspace, pero no está
+//!   wireado aquí), ni polarimetría/KDP/dealiasing por la misma razón: esos
+//!   crates existen mas no están conectados.
+//! - Censura por `sig_threshold`/`sqi_threshold`/`log_threshold`: ver el
+//!   doc-comment de `crate::ray`. `ccor_threshold` no se aplica (no hay
+//!   CCOR que evaluar).
 //! - No hay barrido: `volume_seq`/`sweep_seq`/`ray_index` quedan a 0, y
 //!   `az_end_deg`/`el_end_deg` valen lo mismo que `az_start_deg`/
 //!   `el_start_deg` — no hay controlador de antena en este repo.
@@ -249,13 +253,17 @@ async fn handle_down_message(
     }
 }
 
-/// Sólo UZ+V, pulse-pair, sin dealiasing: ver el doc-comment de `crate`
-/// para por qué. `max_gates`/`max_pulses` son el techo del tipo de cable
-/// (`n_gates`/`n_pulses` son `u16`), no un límite de hardware medido —
-/// ningún documento del repo da uno real.
+/// UZ+V (pulse-pair) más SQI+SIG (censura, `crate::ray`), sin dealiasing:
+/// ver el doc-comment de `crate` para por qué no hay más. `max_gates`/
+/// `max_pulses` son el techo del tipo de cable (`n_gates`/`n_pulses` son
+/// `u16`), no un límite de hardware medido — ningún documento del repo da
+/// uno real.
 fn capabilities() -> Capabilities {
     Capabilities {
-        moment_mask: (1 << moment_kind::UZ) | (1 << moment_kind::V),
+        moment_mask: (1 << moment_kind::UZ)
+            | (1 << moment_kind::V)
+            | (1 << moment_kind::SQI)
+            | (1 << moment_kind::SIG),
         dealias_mask: 1 << dealias_mode::NONE,
         estimator_mask: 1 << estimator::PULSE_PAIR,
         max_gates: u16::MAX as u32,

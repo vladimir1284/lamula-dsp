@@ -73,6 +73,8 @@ dependencies = [
  "lamula-contract",
  "lamula-ingest",
  "lamula-moments",
+ "lamula-noise",
+ "lamula-quality",
  "lamula-rcp-link",
  "lamula-simulator",
  "rand",
