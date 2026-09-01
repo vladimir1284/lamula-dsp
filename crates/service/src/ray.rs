@@ -4,27 +4,32 @@
 //! `noise_floor_dbm`, `radar_constant_db`) tomados aquí del `config` real
 //! aplicado a la sesión, no inventados.
 //!
-//! Momentos: UZ (sin corregir), V, SQI y SIG del canal 0 (pulse-pair), más
-//! ZDR/ρHV/ΦDP/KDP cuando el radial trae un segundo canal
-//! (`lamula_polarimetry` en modo simultáneo/STAR, `lamula_kdp` sobre el ΦDP
-//! resultante) — ver el doc-comment de `crate` para por qué no hay más (CCOR
-//! no se publica porque no hay filtro de clutter conectado). `acq_time_utc_ns`/
-//! `acq_monotonic_ns` usan el mismo `timestamp_ns` del DRx para los dos
-//! campos: el contrato `DRx↔DSP` sólo documenta ese campo como "instante del
-//! trigger, reloj del DRx", sin confirmar que sea época UTC — la misma
-//! simplificación que ya hace el vertical slice.
+//! Momentos: UZ (sin corregir), CZ (corregida, `lamula_calibration`), V,
+//! SQI y SIG del canal 0 (pulse-pair), más ZDR/ρHV/ΦDP/KDP cuando el radial
+//! trae un segundo canal (`lamula_polarimetry` en modo simultáneo/STAR,
+//! `lamula_kdp` sobre el ΦDP resultante) — ver el doc-comment de `crate`
+//! para por qué no hay más (CCOR no se publica porque no hay filtro de
+//! clutter conectado). `acq_time_utc_ns`/`acq_monotonic_ns` usan el mismo
+//! `timestamp_ns` del DRx para los dos campos: el contrato `DRx↔DSP` sólo
+//! documenta ese campo como "instante del trigger, reloj del DRx", sin
+//! confirmar que sea época UTC — la misma simplificación que ya hace el
+//! vertical slice.
 //!
 //! Censura (`docs/algorithms/ruido-y-umbrales.md` §"Umbrales"): se evalúan
 //! `sig_threshold`, `sqi_threshold` y `log_threshold` sobre cada celda; si
-//! cualquiera de los tres dispara, UZ y V de esa celda se codifican como
-//! NaN (`moment_flag::HAS_MISSING` en su bloque, `ray_flag::CENSORED` en el
-//! radial) — "se censura el momento publicado, no la muestra de entrada".
-//! SQI y SIG en sí NUNCA se censuran por estos umbrales: son el índice que
-//! explica por qué la celda se descartó, y ocultarlo sería contradecir la
-//! razón de publicarlo (misma página, última frase de esa sección). SIG sí
-//! puede salir NaN cuando no está matemáticamente definido (`s_linear <= 0`,
-//! ver `lamula_quality::sig_db`) — eso no es censura por umbral, es un valor
-//! indefinido, y también marca `HAS_MISSING`.
+//! cualquiera de los tres dispara, UZ, CZ y V de esa celda se codifican
+//! como NaN (`moment_flag::HAS_MISSING` en su bloque, `ray_flag::CENSORED`
+//! en el radial) — "se censura el momento publicado, no la muestra de
+//! entrada". SQI y SIG en sí NUNCA se censuran por estos umbrales: son el
+//! índice que explica por qué la celda se descartó, y ocultarlo sería
+//! contradecir la razón de publicarlo (misma página, última frase de esa
+//! sección). SIG sí puede salir NaN cuando no está matemáticamente
+//! definido (`s_linear <= 0`, ver `lamula_quality::sig_db`) — eso no es
+//! censura por umbral, es un valor indefinido, y también marca
+//! `HAS_MISSING`. CZ tiene una segunda fuente de NaN independiente de la
+//! censura: `range_km <= 0` (`start_range_m == 0.0`, valor válido según el
+//! contrato) hace que la ecuación del radar no tenga sentido para esa
+//! celda — ver el comentario junto a `cz_values`.
 //! `ccor_threshold` no se aplica: no hay CCOR que evaluar sin filtro de
 //! clutter conectado (hueco real, no un umbral que se ignore a propósito).
 //!
@@ -58,6 +63,7 @@
 //! ver su doc-comment. Dealiasing de rango (`lamula-range-dealias`) sigue
 //! sin conectar: `crate::main` documenta por qué.
 
+use lamula_calibration::power_to_dbz;
 use lamula_contract::dsp_rcp::{
     data_type, dealias_mode, moment_flag, moment_kind, ray_flag, Config, MomentField, MomentRay,
 };
@@ -427,6 +433,32 @@ pub fn build_moment_ray(
         .map(|q| q.sig_value.map(|v| v as f32).unwrap_or(f32::NAN))
         .collect();
 
+    // CZ (`lamula_calibration::power_to_dbz`): misma censura que UZ/V (ver
+    // arriba, `q.censored` ya implica `e.s_linear > 0` — `gate_quality`
+    // fuerza `uz_db = NEG_INFINITY <= log_threshold` en ese caso, así que
+    // nunca llega sin censurar un `s_linear` no positivo a `power_to_dbz`,
+    // que entra en pánico con eso). Guardia aparte: `range_km <= 0.0`
+    // (`start_range_m == 0.0`, valor válido según
+    // `lamula_rcp_link::validate::validate_config`, sólo lo rechaza si es
+    // negativo) — la ecuación del radar no tiene sentido a rango cero, así
+    // que esa celda sale NaN aunque no esté censurada por umbral.
+    let radar_constant_db = config.radar_constant_db as f64;
+    let start_range_km = config.start_range_m as f64 / 1000.0;
+    let gate_spacing_km_cz = config.gate_spacing_m as f64 / 1000.0;
+    let cz_values: Vec<f32> = quality
+        .iter()
+        .zip(estimates.iter())
+        .enumerate()
+        .map(|(i, (q, e))| {
+            let range_km = start_range_km + i as f64 * gate_spacing_km_cz;
+            if q.censored || range_km <= 0.0 {
+                f32::NAN
+            } else {
+                power_to_dbz(e.s_linear, range_km, radar_constant_db) as f32
+            }
+        })
+        .collect();
+
     // Sólo hay ρHV/ZDR/ΦDP/KDP con un segundo canal (V) presente en el
     // radial — `channel_mask`/`channels.len()` lo refleja tal cual llega
     // del DRx.
@@ -505,7 +537,7 @@ pub fn build_moment_ray(
         }
     };
 
-    let mut moments = Vec::with_capacity(8);
+    let mut moments = Vec::with_capacity(9);
     if config.moment_mask & (1 << moment_kind::UZ) != 0 {
         moments.push(MomentBlock {
             field: MomentField {
@@ -560,6 +592,24 @@ pub fn build_moment_ray(
                 offset: 0.0,
             },
             values: sig_values,
+        });
+    }
+    if config.moment_mask & (1 << moment_kind::CZ) != 0 {
+        moments.push(MomentBlock {
+            field: MomentField {
+                kind: moment_kind::CZ,
+                data_type: data_type::F32,
+                // `CORRECTED` va siempre, no sólo cuando el bloque no tiene
+                // NaN: describe que ESTE momento (a diferencia de UZ) lleva
+                // la ecuación del radar aplicada, no el estado de censura
+                // de una celda en particular.
+                flags: moment_flags(&cz_values) | moment_flag::CORRECTED,
+                pad0: 0,
+                n_gates: n_gates as u32,
+                scale: 1.0,
+                offset: 0.0,
+            },
+            values: cz_values,
         });
     }
     if let Some((zdr_values, rhohv_values, phidp_values, kdp_values)) = polarimetric {
@@ -811,6 +861,7 @@ mod tests {
     }
 
     const ALL_MOMENTS_MASK: u32 = (1 << moment_kind::UZ)
+        | (1 << moment_kind::CZ)
         | (1 << moment_kind::V)
         | (1 << moment_kind::SQI)
         | (1 << moment_kind::SIG)
@@ -1202,5 +1253,101 @@ mod tests {
                 "V desdoblado ({v}) debería acercarse a v_true={V_TRUE}"
             );
         }
+    }
+
+    #[test]
+    fn cz_matches_radar_equation_and_uz_stays_uncorrected() {
+        let mut rng = StdRng::seed_from_u64(20260901);
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 3.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.0 / 1000.0,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let h = generate_cell(&cell, &mut rng);
+        let radial = radial_from_channels(vec![vec![h]]);
+        let mut config = polarimetric_config((1 << moment_kind::UZ) | (1 << moment_kind::CZ));
+        config.start_range_m = 10_000.0; // 10 km: lejos del caso borde rango 0
+        config.gate_spacing_m = 250.0;
+        config.radar_constant_db = -42.0;
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { moments, .. } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        let uz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::UZ)
+            .expect("falta el bloque de UZ");
+        let cz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CZ)
+            .expect("falta el bloque de CZ");
+
+        assert_eq!(
+            cz.field.flags & moment_flag::CORRECTED,
+            moment_flag::CORRECTED,
+            "CZ debe llevar el flag CORRECTED"
+        );
+        assert_eq!(
+            uz.field.flags & moment_flag::CORRECTED,
+            0,
+            "UZ es 'sin corregir': no lleva CORRECTED"
+        );
+        // A 10 km, `20·log10(10) ≈ 20.0 dB` por encima de UZ (más
+        // `radar_constant_db`, que UZ nunca aplica).
+        let expected = uz.values[0] as f64 + 20.0 * 10.0f64.log10() + config.radar_constant_db as f64;
+        assert!(
+            (cz.values[0] as f64 - expected).abs() < 1e-3,
+            "CZ ({}) debería coincidir con la ecuación del radar aplicada a UZ ({}): esperado {expected}",
+            cz.values[0],
+            uz.values[0]
+        );
+    }
+
+    #[test]
+    fn cz_is_nan_at_zero_range_even_when_not_censored() {
+        let mut rng = StdRng::seed_from_u64(20260901);
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 3.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.0 / 1000.0,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let h = generate_cell(&cell, &mut rng);
+        let radial = radial_from_channels(vec![vec![h]]);
+        // `start_range_m` por defecto de `config_with_thresholds` es 0.0 —
+        // valor válido según el contrato, pero sin sentido físico para la
+        // ecuación del radar en la celda 0.
+        let config = polarimetric_config((1 << moment_kind::UZ) | (1 << moment_kind::CZ));
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { moments, .. } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        let uz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::UZ)
+            .expect("falta el bloque de UZ");
+        let cz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CZ)
+            .expect("falta el bloque de CZ");
+
+        assert!(
+            uz.values[0].is_finite(),
+            "UZ no depende del rango: no debería ser NaN"
+        );
+        assert!(
+            cz.values[0].is_nan(),
+            "CZ a rango 0 no tiene ecuación del radar válida, aunque la celda no esté censurada"
+        );
+        assert_eq!(cz.field.flags & moment_flag::HAS_MISSING, moment_flag::HAS_MISSING);
     }
 }

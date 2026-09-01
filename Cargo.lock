@@ -70,6 +70,7 @@ version = "0.1.0"
 name = "lamula-dsp-service"
 version = "0.1.0"
 dependencies = [
+ "lamula-calibration",
  "lamula-contract",
  "lamula-dual-prf",
  "lamula-ingest",

@@ -16,12 +16,13 @@
 //!
 //! Alcance honesto — lo que este binario deliberadamente NO hace, porque
 //! nada en este workspace lo respalda todavía:
-//! - Produce UZ (reflectividad sin corregir), V (velocidad, desdoblada en
-//!   dual-PRF), SQI y SIG sobre el canal 0 (`crate::ray`, sobre
-//!   `lamula_moments::pulse_pair_moments` y `lamula_quality`), más
+//! - Produce UZ (reflectividad sin corregir), CZ (corregida,
+//!   `lamula_calibration::power_to_dbz`), V (velocidad, desdoblada en
+//!   dual-PRF/staggered-PRT), SQI y SIG sobre el canal 0 (`crate::ray`,
+//!   sobre `lamula_moments::pulse_pair_moments` y `lamula_quality`), más
 //!   ZDR/ρHV/ΦDP/KDP (`lamula_polarimetry` en modo simultáneo/STAR,
 //!   `lamula_kdp`) cuando el radial trae un segundo canal. `capabilities`
-//!   sólo anuncia esos ocho momentos, el estimador pulse-pair y los modos de
+//!   sólo anuncia esos nueve momentos, el estimador pulse-pair y los modos de
 //!   dealiasing dual-PRF y staggered-PRT — cualquier otro bit de `moment_mask` o
 //!   `dealias_mode` en un `config` se rechaza como `moment_unsupported`/
 //!   `dealias_unsupported` antes de llegar aquí
@@ -282,7 +283,7 @@ async fn handle_down_message(
     }
 }
 
-/// UZ+V (pulse-pair) más SQI+SIG (censura, `crate::ray`), ZDR+ρHV+ΦDP+KDP
+/// UZ+CZ+V (pulse-pair) más SQI+SIG (censura, `crate::ray`), ZDR+ρHV+ΦDP+KDP
 /// (canal 1, cuando el radial lo trae) y desdoblado dual-PRF/staggered-PRT:
 /// ver el doc-comment de `crate` para por qué no hay más. `max_gates`/`max_pulses`
 /// son el techo del tipo de cable (`n_gates`/`n_pulses` son `u16`), no un
@@ -290,6 +291,7 @@ async fn handle_down_message(
 fn capabilities() -> Capabilities {
     Capabilities {
         moment_mask: (1 << moment_kind::UZ)
+            | (1 << moment_kind::CZ)
             | (1 << moment_kind::V)
             | (1 << moment_kind::SQI)
             | (1 << moment_kind::SIG)
