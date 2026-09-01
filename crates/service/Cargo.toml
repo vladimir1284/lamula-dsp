@@ -18,6 +18,8 @@ lamula-moments = { path = "../moments" }
 lamula-noise = { path = "../noise" }
 lamula-quality = { path = "../quality" }
 lamula-polarimetry = { path = "../polarimetry" }
+lamula-kdp = { path = "../kdp" }
+lamula-dual-prf = { path = "../dual-prf" }
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 
 [dev-dependencies]

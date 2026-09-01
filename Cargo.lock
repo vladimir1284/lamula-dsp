@@ -71,7 +71,9 @@ name = "lamula-dsp-service"
 version = "0.1.0"
 dependencies = [
  "lamula-contract",
+ "lamula-dual-prf",
  "lamula-ingest",
+ "lamula-kdp",
  "lamula-moments",
  "lamula-noise",
  "lamula-polarimetry",

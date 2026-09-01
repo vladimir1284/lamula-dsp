@@ -16,24 +16,30 @@
 //!
 //! Alcance honesto — lo que este binario deliberadamente NO hace, porque
 //! nada en este workspace lo respalda todavía:
-//! - Produce UZ (reflectividad sin corregir), V (velocidad), SQI y SIG
-//!   sobre el canal 0 (`crate::ray`, sobre `lamula_moments::pulse_pair_moments`
-//!   y `lamula_quality`), más ZDR/ρHV/ΦDP (`lamula_polarimetry`, modo
-//!   simultáneo/STAR) cuando el radial trae un segundo canal. `capabilities`
-//!   sólo anuncia esos siete momentos y el estimador pulse-pair — cualquier
-//!   otro bit de `moment_mask` en un `config` se rechaza como
-//!   `moment_unsupported` antes de llegar aquí
+//! - Produce UZ (reflectividad sin corregir), V (velocidad, desdoblada en
+//!   dual-PRF), SQI y SIG sobre el canal 0 (`crate::ray`, sobre
+//!   `lamula_moments::pulse_pair_moments` y `lamula_quality`), más
+//!   ZDR/ρHV/ΦDP/KDP (`lamula_polarimetry` en modo simultáneo/STAR,
+//!   `lamula_kdp`) cuando el radial trae un segundo canal. `capabilities`
+//!   sólo anuncia esos ocho momentos, el estimador pulse-pair y el modo de
+//!   dealiasing dual-PRF — cualquier otro bit de `moment_mask` o
+//!   `dealias_mode` en un `config` se rechaza como `moment_unsupported`/
+//!   `dealias_unsupported` antes de llegar aquí
 //!   (`lamula_rcp_link::validate::validate_config`). No hay CCOR porque no
 //!   hay filtro de clutter conectado a este binario (el crate
 //!   `lamula-clutter` existe en el workspace, pero no está wireado aquí);
-//!   tampoco hay KDP (depende de un perfil de ΦDP ya censurado, que este
-//!   binario todavía no ensambla por radial) ni ningún dealiasing —
-//!   `lamula-kdp`, `lamula-dual-prf`, `lamula-staggered-prt` y
-//!   `lamula-range-dealias` existen en el workspace pero no están
-//!   conectados.
+//!   tampoco hay staggered-PRT ni dealiasing de rango —
+//!   `lamula-staggered-prt` y `lamula-range-dealias` existen en el workspace
+//!   pero no están conectados.
 //! - Censura por `sig_threshold`/`sqi_threshold`/`log_threshold`, y por
-//!   separado la de ZDR/ρHV/ΦDP: ver el doc-comment de `crate::ray`.
-//!   `ccor_threshold` no se aplica (no hay CCOR que evaluar).
+//!   separado la de ZDR/ρHV/ΦDP/KDP: ver el doc-comment de `crate::ray`.
+//!   `ccor_threshold` no se aplica (no hay CCOR que evaluar). El desdoblado
+//!   dual-PRF se marca `ray_flag::DEALIAS_FAILED` sólo cuando el
+//!   emparejamiento entre radiales consecutivos no es posible (primer
+//!   radial tras `START`/config, o el DRx no alternó `prf_div`); la
+//!   convergencia por celda (residuo de `lamula_dual_prf::dealias_dual_prf`)
+//!   no se evalúa aparte — no hay umbral de "residuo aceptable" documentado
+//!   en este repo.
 //! - No hay barrido: `volume_seq`/`sweep_seq`/`ray_index` quedan a 0, y
 //!   `az_end_deg`/`el_end_deg` valen lo mismo que `az_start_deg`/
 //!   `el_start_deg` — no hay controlador de antena en este repo.
@@ -102,6 +108,10 @@ async fn main() {
     let mut assembler: Option<RadialAssembler> = None;
     let mut ray_seq: u32 = 0;
     let mut first_ray_after_config = false;
+    // Radial anterior para desdoblado dual-PRF (`crate::ray::PreviousPrf`):
+    // se reinicia junto con `assembler` porque emparejar con un radial de
+    // antes de un `START`/config nuevo no tiene sentido físico.
+    let mut previous_prf: Option<ray::PreviousPrf> = None;
     let mut counters = Counters::default();
     let start = tokio::time::Instant::now();
 
@@ -123,14 +133,16 @@ async fn main() {
                             .config()
                             .expect("running implica config aplicado (Session::handle_command)");
                         ray_seq = ray_seq.wrapping_add(1);
-                        let msg = ray::build_moment_ray(
+                        let (msg, next_previous_prf) = ray::build_moment_ray(
                             &radial,
                             cfg_snapshot,
                             ray_seq,
                             first_ray_after_config,
                             cfg.ssi_counts_per_turn,
                             cfg.ssi_zero_offset_deg,
+                            previous_prf.as_ref(),
                         );
+                        previous_prf = Some(next_previous_prf);
                         first_ray_after_config = false;
                         counters.rays_out += 1;
                         if up.send(msg).await.is_err() {
@@ -156,6 +168,7 @@ async fn main() {
                     &up,
                     &mut assembler,
                     &mut first_ray_after_config,
+                    &mut previous_prf,
                     &counters,
                     start,
                 )
@@ -181,12 +194,14 @@ async fn main() {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn handle_down_message(
     msg: DownMessage,
     session: &mut Session,
     up: &mpsc::Sender<UpMessage>,
     assembler: &mut Option<RadialAssembler>,
     first_ray_after_config: &mut bool,
+    previous_prf: &mut Option<ray::PreviousPrf>,
     counters: &Counters,
     start: tokio::time::Instant,
 ) {
@@ -229,9 +244,11 @@ async fn handle_down_message(
                         .n_pulses;
                     *assembler = Some(RadialAssembler::new(n_pulses));
                     *first_ray_after_config = true;
+                    *previous_prf = None;
                 }
                 command::STOP | command::ENTER_SETUP => {
                     *assembler = None;
+                    *previous_prf = None;
                 }
                 command::REQUEST_STATUS => {
                     let status = build_status(session, counters, start);
@@ -258,8 +275,8 @@ async fn handle_down_message(
     }
 }
 
-/// UZ+V (pulse-pair) más SQI+SIG (censura, `crate::ray`) y ZDR+ρHV+ΦDP
-/// (canal 1, cuando el radial lo trae), sin KDP ni dealiasing: ver el
+/// UZ+V (pulse-pair) más SQI+SIG (censura, `crate::ray`), ZDR+ρHV+ΦDP+KDP
+/// (canal 1, cuando el radial lo trae) y desdoblado dual-PRF: ver el
 /// doc-comment de `crate` para por qué no hay más. `max_gates`/`max_pulses`
 /// son el techo del tipo de cable (`n_gates`/`n_pulses` son `u16`), no un
 /// límite de hardware medido — ningún documento del repo da uno real.
@@ -271,8 +288,9 @@ fn capabilities() -> Capabilities {
             | (1 << moment_kind::SIG)
             | (1 << moment_kind::ZDR)
             | (1 << moment_kind::RHOHV)
-            | (1 << moment_kind::PHIDP),
-        dealias_mask: 1 << dealias_mode::NONE,
+            | (1 << moment_kind::PHIDP)
+            | (1 << moment_kind::KDP),
+        dealias_mask: 1 << dealias_mode::NONE | 1 << dealias_mode::DUAL_PRF,
         estimator_mask: 1 << estimator::PULSE_PAIR,
         max_gates: u16::MAX as u32,
         max_pulses: u16::MAX,
