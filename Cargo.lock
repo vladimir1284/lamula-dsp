@@ -80,6 +80,7 @@ dependencies = [
  "lamula-quality",
  "lamula-rcp-link",
  "lamula-simulator",
+ "lamula-staggered-prt",
  "rand",
  "rustfft",
  "tokio",

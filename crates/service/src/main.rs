@@ -21,25 +21,32 @@
 //!   `lamula_moments::pulse_pair_moments` y `lamula_quality`), más
 //!   ZDR/ρHV/ΦDP/KDP (`lamula_polarimetry` en modo simultáneo/STAR,
 //!   `lamula_kdp`) cuando el radial trae un segundo canal. `capabilities`
-//!   sólo anuncia esos ocho momentos, el estimador pulse-pair y el modo de
-//!   dealiasing dual-PRF — cualquier otro bit de `moment_mask` o
+//!   sólo anuncia esos ocho momentos, el estimador pulse-pair y los modos de
+//!   dealiasing dual-PRF y staggered-PRT — cualquier otro bit de `moment_mask` o
 //!   `dealias_mode` en un `config` se rechaza como `moment_unsupported`/
 //!   `dealias_unsupported` antes de llegar aquí
 //!   (`lamula_rcp_link::validate::validate_config`). No hay CCOR porque no
 //!   hay filtro de clutter conectado a este binario (el crate
 //!   `lamula-clutter` existe en el workspace, pero no está wireado aquí);
-//!   tampoco hay staggered-PRT ni dealiasing de rango —
-//!   `lamula-staggered-prt` y `lamula-range-dealias` existen en el workspace
-//!   pero no están conectados.
+//!   tampoco hay dealiasing de rango — `lamula-range-dealias` existe en el
+//!   workspace pero no está conectado: `classify_trip` (detección/marcado)
+//!   no incluye la detección de picos que haría falta para usarlo de
+//!   verdad, y `recover_trip1` necesita fase de burst por pulso, que el
+//!   wire `DRx↔DSP` no transporta en ningún campo.
 //! - Censura por `sig_threshold`/`sqi_threshold`/`log_threshold`, y por
 //!   separado la de ZDR/ρHV/ΦDP/KDP: ver el doc-comment de `crate::ray`.
 //!   `ccor_threshold` no se aplica (no hay CCOR que evaluar). El desdoblado
 //!   dual-PRF se marca `ray_flag::DEALIAS_FAILED` sólo cuando el
 //!   emparejamiento entre radiales consecutivos no es posible (primer
-//!   radial tras `START`/config, o el DRx no alternó `prf_div`); la
-//!   convergencia por celda (residuo de `lamula_dual_prf::dealias_dual_prf`)
-//!   no se evalúa aparte — no hay umbral de "residuo aceptable" documentado
-//!   en este repo.
+//!   radial tras `START`/config, o el DRx no alternó `prf_div`);
+//!   staggered-PRT nunca lo marca, porque el desdoblado es autocontenido
+//!   dentro de un solo radial. En ninguno de los dos modos se evalúa aparte
+//!   la convergencia por celda (residuo de
+//!   `lamula_dual_prf::dealias_dual_prf`) — no hay umbral de "residuo
+//!   aceptable" documentado en este repo. La conversión `Config` (`prf_hz`,
+//!   `prf_ratio_num`/`den`) → `T1`,`T2` de staggered-PRT es una inferencia
+//!   sin respaldo de oráculo (`crate::ray::staggered_prt_split`, ver su
+//!   doc-comment).
 //! - No hay barrido: `volume_seq`/`sweep_seq`/`ray_index` quedan a 0, y
 //!   `az_end_deg`/`el_end_deg` valen lo mismo que `az_start_deg`/
 //!   `el_start_deg` — no hay controlador de antena en este repo.
@@ -276,8 +283,8 @@ async fn handle_down_message(
 }
 
 /// UZ+V (pulse-pair) más SQI+SIG (censura, `crate::ray`), ZDR+ρHV+ΦDP+KDP
-/// (canal 1, cuando el radial lo trae) y desdoblado dual-PRF: ver el
-/// doc-comment de `crate` para por qué no hay más. `max_gates`/`max_pulses`
+/// (canal 1, cuando el radial lo trae) y desdoblado dual-PRF/staggered-PRT:
+/// ver el doc-comment de `crate` para por qué no hay más. `max_gates`/`max_pulses`
 /// son el techo del tipo de cable (`n_gates`/`n_pulses` son `u16`), no un
 /// límite de hardware medido — ningún documento del repo da uno real.
 fn capabilities() -> Capabilities {
@@ -290,7 +297,9 @@ fn capabilities() -> Capabilities {
             | (1 << moment_kind::RHOHV)
             | (1 << moment_kind::PHIDP)
             | (1 << moment_kind::KDP),
-        dealias_mask: 1 << dealias_mode::NONE | 1 << dealias_mode::DUAL_PRF,
+        dealias_mask: 1 << dealias_mode::NONE
+            | 1 << dealias_mode::DUAL_PRF
+            | 1 << dealias_mode::STAGGERED_PRT,
         estimator_mask: 1 << estimator::PULSE_PAIR,
         max_gates: u16::MAX as u32,
         max_pulses: u16::MAX,

@@ -20,6 +20,7 @@ lamula-quality = { path = "../quality" }
 lamula-polarimetry = { path = "../polarimetry" }
 lamula-kdp = { path = "../kdp" }
 lamula-dual-prf = { path = "../dual-prf" }
+lamula-staggered-prt = { path = "../staggered-prt" }
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 
 [dev-dependencies]

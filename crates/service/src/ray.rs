@@ -49,6 +49,14 @@
 //! con algún ΦDP de entrada NaN dentro de su ventana) sale NaN +
 //! `HAS_MISSING`, sin marcar `ray_flag::CENSORED` — mismo criterio que
 //! ZDR/ρHV/ΦDP.
+//!
+//! Desdoblado de velocidad: dual-PRF (`lamula_dual_prf`, cross-radial vía
+//! `PreviousPrf`) y staggered-PRT (`lamula_staggered_prt`, autocontenido
+//! dentro del propio radial — ver [`staggered_velocity_mps`]) están
+//! cableados. La conversión `Config` → `T1`,`T2` de staggered-PRT
+//! (`staggered_prt_split`) es una inferencia mía sin respaldo de oráculo,
+//! ver su doc-comment. Dealiasing de rango (`lamula-range-dealias`) sigue
+//! sin conectar: `crate::main` documenta por qué.
 
 use lamula_contract::dsp_rcp::{
     data_type, dealias_mode, moment_flag, moment_kind, ray_flag, Config, MomentField, MomentRay,
@@ -61,6 +69,7 @@ use lamula_noise::{censored_by_sig_threshold, snr_db};
 use lamula_polarimetry::{polarimetric_moments_simultaneous, PolarimetricFlag};
 use lamula_quality::{sig_db, sqi};
 use lamula_rcp_link::wire::{MomentBlock, UpMessage};
+use lamula_staggered_prt::staggered_pulse_pair_velocities;
 
 const SPEED_OF_LIGHT_M_S: f64 = 299_792_458.0;
 
@@ -92,7 +101,10 @@ const KDP_WINDOW_GATES: usize = 15;
 /// Radio de búsqueda de pliegues para `lamula_dual_prf::continuity_fix`. Sin
 /// campo propio en `Config` (mismo motivo que `KDP_WINDOW_GATES`); 3 es el
 /// valor del propio test de la función y del oráculo
-/// (`tools/oracles/dual_prf_dealiasing.ipynb`, `continuity_fix`).
+/// (`tools/oracles/dual_prf_dealiasing.ipynb`, `continuity_fix`). Se
+/// reutiliza tal cual para staggered-PRT (`staggered_velocity_mps`): mismo
+/// mecanismo de continuidad espacial, sólo cambia si recorre radiales
+/// (dual-PRF) o celdas de un mismo radial (staggered).
 const DUAL_PRF_MAX_FOLD_SEARCH: i64 = 3;
 
 /// `(zdr, rhohv, phidp, kdp)` por celda, sólo con segundo canal — ver el
@@ -147,6 +159,87 @@ fn dual_prf_split(config: &Config) -> (f64, f64, f64, f64, f64) {
     let v_a2 = wavelength_m * prf_high / 4.0;
     let v_ext = den * v_a1;
     (1.0 / prf_low, 1.0 / prf_high, v_a1, v_a2, v_ext)
+}
+
+/// `(t1_s, t2_s, v_a1, v_a2, v_ext)` para muestreo escalonado `T1,T2,T1,T2…`
+/// (`docs/algorithms/staggered-prt.md` §"Parámetros del contrato que
+/// consume"): reutiliza los mismos campos de `Config` que dual-PRF
+/// (`prf_ratio_num`/`prf_ratio_den`, `prf_hz`), con el significado que la
+/// propia página dice que fija el modo — aquí la razón es `T1:T2`, no
+/// PRF baja:alta. **Inferencia mía, no contrastada**: el doc del campo en
+/// el schema (`contract/schema/dsp_rcp_v0_1.toml`) dice literalmente "razón
+/// dual-PRF", sin mencionar staggered, y ningún oráculo
+/// (`tools/oracles/staggered_prt.ipynb`) muestra la conversión
+/// `prf_hz`+razón → `T1`,`T2` en segundos — el oráculo y
+/// `crates/staggered-prt/tests/against_oracle.rs` fijan `T1`/`T2` como
+/// constantes directas, nunca derivadas de un `prf_hz`. Asumo aquí que
+/// `prf_hz` sigue significando "media de las dos PRF resultantes (1/T1,
+/// 1/T2)", mismo criterio que ya uso en [`dual_prf_split`] — autorizado
+/// explícitamente por el usuario en vez de bloquear el cableo.
+///
+/// De `T = (num+den) / (2·num·den·prf_hz)`: `T1 = num·T`, `T2 = den·T` (si
+/// `num < den`, `T1 < T2`). `v_ext` usa el periodo diferencia `|T2−T1|`, tal
+/// como describe la página del algoritmo.
+fn staggered_prt_split(config: &Config) -> (f64, f64, f64, f64, f64) {
+    let wavelength_m = config.wavelength_m as f64;
+    let num = config.prf_ratio_num as f64;
+    let den = config.prf_ratio_den as f64;
+    let t = (num + den) / (2.0 * num * den * config.prf_hz as f64);
+    let t1 = num * t;
+    let t2 = den * t;
+    let v_a1 = wavelength_m / (4.0 * t1);
+    let v_a2 = wavelength_m / (4.0 * t2);
+    let v_ext = wavelength_m / (4.0 * (t2 - t1).abs());
+    (t1, t2, v_a1, v_a2, v_ext)
+}
+
+/// Velocidad desdoblada por celda en modo staggered-PRT: a diferencia de
+/// dual-PRF, las dos medidas plegadas (`v1`, `v2`) salen de la MISMA ráfaga
+/// —no hace falta radial anterior ni `PreviousPrf`—, así que nunca hay
+/// "sin con qué emparejar" y `ray_flag::DEALIAS_FAILED` no se marca en este
+/// modo (misma razón que en dual-PRF: no hay umbral de residuo aceptable
+/// documentado para marcarlo por convergencia). Reutiliza
+/// `lamula_dual_prf::dealias_dual_prf`/`continuity_fix` sin reimplementar
+/// el teorema chino del resto — `docs/algorithms/staggered-prt.md` lo
+/// llama "exactamente el mismo mecanismo".
+fn staggered_velocity_mps(radial: &AssembledRadial, config: &Config) -> Vec<f32> {
+    let wavelength_m = config.wavelength_m as f64;
+    let (t1, t2, v_a1, v_a2, v_ext) = staggered_prt_split(config);
+    // `dealias_dual_prf`/`continuity_fix` buscan pliegues del PRIMER eje que
+    // reciben (pasos de `2·v_a`), y usan el segundo sólo para reconciliar
+    // sin desdoblarlo: por diseño el primer eje tiene que ser el de Nyquist
+    // más CHICA (periodo más largo). Si se pasa al revés, la ventana de
+    // aceptación (`v_ext + v_a_eje1`) se ensancha lo suficiente para
+    // admitir un candidato fantasma exactamente a `4·v_a_eje1 == 3·(2·v_a_
+    // eje2)` de distancia — coincidencia EXACTA por la razón simple
+    // `T1:T2`, no un caso raro de redondeo (así se descubrió: test de este
+    // módulo con `v_true` cerca del borde de `v_ext` fallaba en seco). No
+    // se asume cuál de `T1`/`T2` es la más larga; se decide comparando
+    // `v_a1`/`v_a2` directamente.
+    let t1_is_finer_axis = v_a1 <= v_a2;
+    let (axis1_va, axis2_va) = if t1_is_finer_axis {
+        (v_a1, v_a2)
+    } else {
+        (v_a2, v_a1)
+    };
+
+    let v_hats: Vec<f64> = radial.channels[0]
+        .iter()
+        .map(|series| {
+            let (v_from_t1, v_from_t2) =
+                staggered_pulse_pair_velocities(series, wavelength_m, t1, t2);
+            let (axis1_meas, axis2_meas) = if t1_is_finer_axis {
+                (v_from_t1, v_from_t2)
+            } else {
+                (v_from_t2, v_from_t1)
+            };
+            dealias_dual_prf(axis1_meas, axis2_meas, axis1_va, axis2_va, v_ext).velocity_mps
+        })
+        .collect();
+    continuity_fix(&v_hats, axis1_va, DUAL_PRF_MAX_FOLD_SEARCH)
+        .into_iter()
+        .map(|v| v as f32)
+        .collect()
 }
 
 /// Cantidades derivadas de un `PulsePairEstimate` que la censura y los
@@ -263,7 +356,18 @@ pub fn build_moment_ray(
     // celda (residuo de `dealias_dual_prf`) no se evalúa aparte: no hay
     // umbral documentado en este repo para "residuo aceptable", mismo tipo
     // de hueco que `RHOHV_THRESHOLD_KDP`.
-    let dealiased_velocity_mps: Vec<f32> = match (dual_prf_role, previous_prf) {
+    // Staggered-PRT no toca `dual_prf_role`/`previous_prf` en absoluto: el
+    // desdoblado es autocontenido dentro del propio radial (ver
+    // `staggered_velocity_mps`). `raw_velocity_mps` (calculada arriba con
+    // `mean_prt_s`, sin sentido físico como fase de un único retardo
+    // uniforme en este modo) no se usa como velocidad publicada aquí, sólo
+    // queda en `PreviousPrf` por uniformidad de la firma — dual-PRF nunca
+    // la lee porque `dual_prf_role` es `None` cuando `dealias_mode !=
+    // DUAL_PRF`.
+    let dealiased_velocity_mps: Vec<f32> = if config.dealias_mode == dealias_mode::STAGGERED_PRT {
+        staggered_velocity_mps(radial, config)
+    } else {
+        match (dual_prf_role, previous_prf) {
         (Some(is_low), Some(prev)) if prev.velocity_mps.len() == raw_velocity_mps.len() => {
             let (prt_low, prt_high, v_a1, v_a2, v_ext) = dual_prf_split(config);
             // El rol de `prev` es el opuesto del de este radial (si no,
@@ -303,6 +407,7 @@ pub fn build_moment_ray(
             raw_velocity_mps.clone()
         }
         _ => raw_velocity_mps.clone(),
+        }
     };
 
     let v_values: Vec<f32> = dealiased_velocity_mps
@@ -541,12 +646,13 @@ pub fn build_moment_ray(
         start_range_m: config.start_range_m,
         gate_spacing_m: config.gate_spacing_m,
         prf_hz: config.prf_hz,
-        // Dual-PRF publica la Nyquist EXTENDIDA (doc del algoritmo,
-        // §"Parámetros del contrato que consume"), no la de una sola PRF.
-        nyquist_velocity: if config.dealias_mode == dealias_mode::DUAL_PRF {
-            dual_prf_split(config).4 as f32
-        } else {
-            (wavelength_m / (4.0 * mean_prt_s)) as f32
+        // Dual-PRF y staggered-PRT publican la Nyquist EXTENDIDA (doc de
+        // cada algoritmo, §"Parámetros del contrato que consume"), no la de
+        // un solo periodo.
+        nyquist_velocity: match config.dealias_mode {
+            dealias_mode::DUAL_PRF => dual_prf_split(config).4 as f32,
+            dealias_mode::STAGGERED_PRT => staggered_prt_split(config).4 as f32,
+            _ => (wavelength_m / (4.0 * mean_prt_s)) as f32,
         },
         unambiguous_range_m: (SPEED_OF_LIGHT_M_S / (2.0 * config.prf_hz as f64)) as f32,
         noise_floor_dbm: config.noise_floor_dbm,
@@ -1006,5 +1112,95 @@ mod tests {
             "V desdoblado ({}) debería acercarse a v_true={V_TRUE}",
             v_block.values[0]
         );
+    }
+
+    fn staggered_prt_config() -> Config {
+        // Misma razón 2:3 que `crates/staggered-prt/tests/against_oracle.rs`
+        // (T1=0.8ms, T2=1.2ms): con esa razón, `staggered_prt_split` da
+        // exactamente esos T1/T2 a partir del mismo `prf_hz` medio que ya
+        // usa `dual_prf_config` (coincide en valor porque es el mismo par
+        // T1/T2, sólo con los roles PRF baja/alta invertidos).
+        let mean_prf_hz = (1.0 / 1.2e-3 + 1.0 / 0.8e-3) / 2.0;
+        Config {
+            dealias_mode: dealias_mode::STAGGERED_PRT,
+            prf_hz: mean_prf_hz as f32,
+            prf_ratio_num: 2,
+            prf_ratio_den: 3,
+            moment_mask: (1 << moment_kind::UZ) | (1 << moment_kind::V),
+            ..config_with_thresholds(3.0, 0.4, -100.0)
+        }
+    }
+
+    /// Serie IQ escalonada `T1,T2,T1,T2,…` perfectamente coherente (sin
+    /// ruido, ancho espectral cero): caso límite de la ACF analítica que usa
+    /// `crates/staggered-prt/tests/against_oracle.rs`
+    /// (`analytic_acf` con `sigma_v=0` colapsa a una fase pura), útil aquí
+    /// para probar el cableo con un valor exacto en vez de estadística.
+    fn generate_coherent_staggered_channel(
+        power_s: f64,
+        mean_v: f64,
+        wavelength_m: f64,
+        t1: f64,
+        t2: f64,
+        m: usize,
+    ) -> Vec<Complex64> {
+        let mut times = vec![0.0f64; m];
+        for i in 1..m {
+            let dt = if (i - 1) % 2 == 0 { t1 } else { t2 };
+            times[i] = times[i - 1] + dt;
+        }
+        times
+            .iter()
+            .map(|&t| {
+                Complex64::from_polar(
+                    power_s.sqrt(),
+                    4.0 * std::f64::consts::PI * mean_v * t / wavelength_m,
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn staggered_prt_dealias_recovers_velocity_beyond_single_nyquist() {
+        // V_A1≈31.25 m/s (T1=0.8ms), V_A2≈20.83 m/s (T2=1.2ms), V_EXT=62.5
+        // m/s (ver `staggered_prt_split`) — mismos valores que
+        // `crates/staggered-prt/tests/against_oracle.rs`. v_true=40 m/s cae
+        // más allá de las dos Nyquist individuales pero dentro de la
+        // extendida: sólo se recupera bien si el desdoblado corre de
+        // verdad, no si se publica la medida plegada tal cual.
+        const V_TRUE: f64 = 40.0;
+        const WAVELENGTH_M: f64 = 0.10;
+        const T1: f64 = 0.8e-3;
+        const T2: f64 = 1.2e-3;
+        const N_GATES: usize = 4;
+        const M_PULSES: usize = 32;
+
+        let config = staggered_prt_config();
+        let channel: Vec<Vec<Complex64>> = (0..N_GATES)
+            .map(|_| {
+                generate_coherent_staggered_channel(1.0, V_TRUE, WAVELENGTH_M, T1, T2, M_PULSES)
+            })
+            .collect();
+        let radial = radial_from_channels(vec![channel]);
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { ray, moments } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        assert_eq!(
+            ray.ray_flags & ray_flag::DEALIAS_FAILED,
+            0,
+            "staggered-PRT nunca marca dealias_failed: el desdoblado es autocontenido en el radial"
+        );
+        let v_block = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::V)
+            .expect("falta el bloque de V");
+        for &v in &v_block.values {
+            assert!(
+                (v as f64 - V_TRUE).abs() < 2.0,
+                "V desdoblado ({v}) debería acercarse a v_true={V_TRUE}"
+            );
+        }
     }
 }
