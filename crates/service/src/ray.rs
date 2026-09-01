@@ -4,14 +4,15 @@
 //! `noise_floor_dbm`, `radar_constant_db`) tomados aquí del `config` real
 //! aplicado a la sesión, no inventados.
 //!
-//! Momentos: UZ (sin corregir), V, SQI y SIG — ver el doc-comment de `crate`
-//! para por qué no hay más (`pulse_pair_moments` es el único estimador
-//! conectado a este binario, y CCOR no se publica porque no hay filtro de
-//! clutter conectado tampoco). `acq_time_utc_ns`/`acq_monotonic_ns` usan el
-//! mismo `timestamp_ns` del DRx para los dos campos: el contrato `DRx↔DSP`
-//! sólo documenta ese campo como "instante del trigger, reloj del DRx", sin
-//! confirmar que sea época UTC — la misma simplificación que ya hace el
-//! vertical slice.
+//! Momentos: UZ (sin corregir), V, SQI y SIG del canal 0 (pulse-pair), más
+//! ZDR/ρHV/ΦDP cuando el radial trae un segundo canal (`lamula_polarimetry`,
+//! modo simultáneo/STAR) — ver el doc-comment de `crate` para por qué no hay
+//! más (CCOR no se publica porque no hay filtro de clutter conectado, KDP y
+//! dealiasing tampoco están wireados aún). `acq_time_utc_ns`/
+//! `acq_monotonic_ns` usan el mismo `timestamp_ns` del DRx para los dos
+//! campos: el contrato `DRx↔DSP` sólo documenta ese campo como "instante del
+//! trigger, reloj del DRx", sin confirmar que sea época UTC — la misma
+//! simplificación que ya hace el vertical slice.
 //!
 //! Censura (`docs/algorithms/ruido-y-umbrales.md` §"Umbrales"): se evalúan
 //! `sig_threshold`, `sqi_threshold` y `log_threshold` sobre cada celda; si
@@ -26,6 +27,15 @@
 //! indefinido, y también marca `HAS_MISSING`.
 //! `ccor_threshold` no se aplica: no hay CCOR que evaluar sin filtro de
 //! clutter conectado (hueco real, no un umbral que se ignore a propósito).
+//!
+//! ZDR/ρHV/ΦDP tienen su propia censura, independiente de la de arriba: si
+//! `P_h` o `P_v` no superan `MIN_SNR_LIN_POLARIMETRIC` veces su propio ruido
+//! (`lamula_polarimetry::PolarimetricFlag::Censored`), los tres salen NaN y
+//! marcan `HAS_MISSING` en sus bloques — pero NO ponen `ray_flag::CENSORED`,
+//! reservado a la censura de UZ/V de arriba (no hay una tercera cosa que
+//! ese flag pueda distinguir). Si el radial sólo trae un canal, los tres
+//! bloques simplemente no se publican aunque `moment_mask` los pida — no hay
+//! canal V con que calcularlos.
 
 use lamula_contract::dsp_rcp::{
     data_type, moment_flag, moment_kind, ray_flag, Config, MomentField, MomentRay,
@@ -33,10 +43,19 @@ use lamula_contract::dsp_rcp::{
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
 use lamula_moments::{pulse_pair_moments, PulsePairEstimate};
 use lamula_noise::{censored_by_sig_threshold, snr_db};
+use lamula_polarimetry::{polarimetric_moments_simultaneous, PolarimetricFlag};
 use lamula_quality::{sig_db, sqi};
 use lamula_rcp_link::wire::{MomentBlock, UpMessage};
 
 const SPEED_OF_LIGHT_M_S: f64 = 299_792_458.0;
+
+/// Margen mínimo de SNR lineal para censurar ZDR/ρHV/ΦDP
+/// (`lamula_polarimetry::polarimetric_moments_simultaneous`). El valor de
+/// referencia es el que usa `tools/oracles/polarimetria_covarianzas.ipynb`
+/// (0.05) — `Config` (`contract/schema/dsp_rcp_v0_1.toml`) todavía no tiene
+/// un campo propio para este margen, así que aquí queda fijo en vez de
+/// inventarle un origen de configuración que no existe.
+const MIN_SNR_LIN_POLARIMETRIC: f64 = 0.05;
 
 /// Cantidades derivadas de un `PulsePairEstimate` que la censura y los
 /// cuatro momentos publicados necesitan, calculadas una sola vez por celda.
@@ -89,9 +108,9 @@ pub fn build_moment_ray(
     let prf_hz = config.prf_hz as f64;
     let prt_s = 1.0 / prf_hz;
 
-    // `pulse_pair_moments` sólo corre sobre el canal 0: ver `capabilities`
-    // en `crate::main` (`n_rx_channels: 1`), único canal que este binario
-    // declara saber procesar.
+    // UZ/V/SQI/SIG (pulse-pair) sólo corren sobre el canal 0 — H, por
+    // convención del contrato. El canal 1 (V), cuando está presente, sólo
+    // alimenta ZDR/ρHV/ΦDP más abajo.
     let estimates: Vec<_> = radial.channels[0]
         .iter()
         .map(|series| pulse_pair_moments(series, wavelength_m, prt_s))
@@ -128,6 +147,34 @@ pub fn build_moment_ray(
         .map(|q| q.sig_value.map(|v| v as f32).unwrap_or(f32::NAN))
         .collect();
 
+    // Sólo hay ρHV/ZDR/ΦDP con un segundo canal (V) presente en el radial —
+    // `channel_mask`/`channels.len()` lo refleja tal cual llega del DRx.
+    let polarimetric: Option<(Vec<f32>, Vec<f32>, Vec<f32>)> = (radial.channels.len() > 1)
+        .then(|| {
+            let mut zdr = Vec::with_capacity(n_gates as usize);
+            let mut rhohv = Vec::with_capacity(n_gates as usize);
+            let mut phidp = Vec::with_capacity(n_gates as usize);
+            for (h, v) in radial.channels[0].iter().zip(radial.channels[1].iter()) {
+                let est = polarimetric_moments_simultaneous(
+                    h,
+                    v,
+                    config.zdr_offset_db as f64,
+                    config.phidp_offset_deg as f64,
+                    MIN_SNR_LIN_POLARIMETRIC,
+                );
+                let (z, r, p) = match est.flag {
+                    PolarimetricFlag::Ok => {
+                        (est.zdr_db as f32, est.rhohv as f32, est.phidp_deg as f32)
+                    }
+                    PolarimetricFlag::Censored => (f32::NAN, f32::NAN, f32::NAN),
+                };
+                zdr.push(z);
+                rhohv.push(r);
+                phidp.push(p);
+            }
+            (zdr, rhohv, phidp)
+        });
+
     let az_start_deg =
         ssi_counts_to_deg(radial.azimuth_raw, ssi_counts_per_turn, ssi_zero_offset_deg) as f32;
     let el_start_deg = ssi_counts_to_deg(
@@ -152,7 +199,7 @@ pub fn build_moment_ray(
         }
     };
 
-    let mut moments = Vec::with_capacity(4);
+    let mut moments = Vec::with_capacity(7);
     if config.moment_mask & (1 << moment_kind::UZ) != 0 {
         moments.push(MomentBlock {
             field: MomentField {
@@ -208,6 +255,50 @@ pub fn build_moment_ray(
             },
             values: sig_values,
         });
+    }
+    if let Some((zdr_values, rhohv_values, phidp_values)) = polarimetric {
+        if config.moment_mask & (1 << moment_kind::ZDR) != 0 {
+            moments.push(MomentBlock {
+                field: MomentField {
+                    kind: moment_kind::ZDR,
+                    data_type: data_type::F32,
+                    flags: moment_flags(&zdr_values),
+                    pad0: 0,
+                    n_gates: n_gates as u32,
+                    scale: 1.0,
+                    offset: 0.0,
+                },
+                values: zdr_values,
+            });
+        }
+        if config.moment_mask & (1 << moment_kind::RHOHV) != 0 {
+            moments.push(MomentBlock {
+                field: MomentField {
+                    kind: moment_kind::RHOHV,
+                    data_type: data_type::F32,
+                    flags: moment_flags(&rhohv_values),
+                    pad0: 0,
+                    n_gates: n_gates as u32,
+                    scale: 1.0,
+                    offset: 0.0,
+                },
+                values: rhohv_values,
+            });
+        }
+        if config.moment_mask & (1 << moment_kind::PHIDP) != 0 {
+            moments.push(MomentBlock {
+                field: MomentField {
+                    kind: moment_kind::PHIDP,
+                    data_type: data_type::F32,
+                    flags: moment_flags(&phidp_values),
+                    pad0: 0,
+                    n_gates: n_gates as u32,
+                    scale: 1.0,
+                    offset: 0.0,
+                },
+                values: phidp_values,
+            });
+        }
     }
 
     let ray = MomentRay {
@@ -353,5 +444,166 @@ mod tests {
             q.sig_value.is_none(),
             "sin señal detectable SIG no está definido, no es 'censurado'"
         );
+    }
+
+    use lamula_simulator::{generate_dual_pol_cell, CellParams, DualPolParams};
+    use rand::rngs::StdRng;
+    use rand::SeedableRng;
+    use rustfft::num_complex::Complex64;
+
+    fn polarimetric_config(moment_mask: u32) -> Config {
+        Config {
+            moment_mask,
+            zdr_offset_db: 0.0,
+            phidp_offset_deg: 0.0,
+            ..config_with_thresholds(3.0, 0.4, -100.0)
+        }
+    }
+
+    fn radial_from_channels(channels: Vec<Vec<Vec<Complex64>>>) -> AssembledRadial {
+        AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: if channels.len() > 1 { 0b0011 } else { 0b0001 },
+            channels,
+            dropped_pulses: 0,
+        }
+    }
+
+    const ALL_MOMENTS_MASK: u32 = (1 << moment_kind::UZ)
+        | (1 << moment_kind::V)
+        | (1 << moment_kind::SQI)
+        | (1 << moment_kind::SIG)
+        | (1 << moment_kind::ZDR)
+        | (1 << moment_kind::RHOHV)
+        | (1 << moment_kind::PHIDP);
+
+    #[test]
+    fn dual_channel_radial_publishes_polarimetric_moments() {
+        let mut rng = StdRng::seed_from_u64(20260901);
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 3.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.0 / 1000.0,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let dual = DualPolParams {
+            zdr_db: 2.0,
+            rho_hv: 0.98,
+            phidp_deg: 10.0,
+        };
+        let (h, v) = generate_dual_pol_cell(&cell, &dual, &mut rng);
+        let radial = radial_from_channels(vec![vec![h], vec![v]]);
+        let config = polarimetric_config(ALL_MOMENTS_MASK);
+
+        let UpMessage::MomentRay { moments, .. } =
+            build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0)
+        else {
+            panic!("se esperaba MomentRay");
+        };
+
+        for kind in [moment_kind::ZDR, moment_kind::RHOHV, moment_kind::PHIDP] {
+            let block = moments
+                .iter()
+                .find(|m| m.field.kind == kind)
+                .unwrap_or_else(|| panic!("falta el bloque de moment_kind {kind}"));
+            assert!(
+                block.values[0].is_finite(),
+                "celda con SNR y coherencia altas no debería censurarse"
+            );
+        }
+    }
+
+    #[test]
+    fn single_channel_radial_omits_polarimetric_moments() {
+        let mut rng = StdRng::seed_from_u64(20260901);
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 3.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.0 / 1000.0,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let dual = DualPolParams {
+            zdr_db: 2.0,
+            rho_hv: 0.98,
+            phidp_deg: 10.0,
+        };
+        let (h, _v) = generate_dual_pol_cell(&cell, &dual, &mut rng);
+        let radial = radial_from_channels(vec![vec![h]]);
+        let config = polarimetric_config(ALL_MOMENTS_MASK);
+
+        let UpMessage::MomentRay { moments, .. } =
+            build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0)
+        else {
+            panic!("se esperaba MomentRay");
+        };
+
+        for kind in [moment_kind::ZDR, moment_kind::RHOHV, moment_kind::PHIDP] {
+            assert!(
+                !moments.iter().any(|m| m.field.kind == kind),
+                "sin canal V no hay con qué calcular moment_kind {kind}"
+            );
+        }
+    }
+
+    #[test]
+    fn decorrelated_channels_censor_polarimetric_moments() {
+        let mut rng = StdRng::seed_from_u64(20260901);
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 3.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.0 / 1000.0,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        // rho_hv = 0.0 no basta por sí solo para forzar la censura (que
+        // depende del margen de SNR por canal, no de rho_hv): se baja
+        // `power_s` muy por debajo del ruido para que sí dispare (con
+        // margen amplio frente al ruido de estimación de `noise_floor`).
+        let cell = CellParams {
+            power_s: 0.0001,
+            ..cell
+        };
+        let dual = DualPolParams {
+            zdr_db: 0.0,
+            rho_hv: 0.0,
+            phidp_deg: 0.0,
+        };
+        let (h, v) = generate_dual_pol_cell(&cell, &dual, &mut rng);
+        let radial = radial_from_channels(vec![vec![h], vec![v]]);
+        let config = polarimetric_config(ALL_MOMENTS_MASK);
+
+        let UpMessage::MomentRay { moments, .. } =
+            build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0)
+        else {
+            panic!("se esperaba MomentRay");
+        };
+
+        for kind in [moment_kind::ZDR, moment_kind::RHOHV, moment_kind::PHIDP] {
+            let block = moments
+                .iter()
+                .find(|m| m.field.kind == kind)
+                .unwrap_or_else(|| panic!("falta el bloque de moment_kind {kind}"));
+            assert!(
+                block.values[0].is_nan(),
+                "SNR por debajo del margen debería censurar ZDR/ρHV/ΦDP"
+            );
+            assert_eq!(block.field.flags, moment_flag::HAS_MISSING);
+        }
     }
 }

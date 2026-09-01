@@ -17,8 +17,10 @@ lamula-rcp-link = { path = "../rcp-link" }
 lamula-moments = { path = "../moments" }
 lamula-noise = { path = "../noise" }
 lamula-quality = { path = "../quality" }
+lamula-polarimetry = { path = "../polarimetry" }
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 
 [dev-dependencies]
 lamula-simulator = { path = "../simulator" }
 rand = "0.8"
+rustfft = "6"

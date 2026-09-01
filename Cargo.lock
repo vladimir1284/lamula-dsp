@@ -74,10 +74,12 @@ dependencies = [
  "lamula-ingest",
  "lamula-moments",
  "lamula-noise",
+ "lamula-polarimetry",
  "lamula-quality",
  "lamula-rcp-link",
  "lamula-simulator",
  "rand",
+ "rustfft",
  "tokio",
 ]
 
