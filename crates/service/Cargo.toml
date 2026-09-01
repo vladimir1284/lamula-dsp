@@ -1,0 +1,22 @@
+[package]
+name = "lamula-dsp-service"
+description = "Proceso DSP real: escucha DRx (AAL) y RCP, corre la máquina de estados de control, ensambla radiales y emite momentos por el enlace RCP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "lamula-dsp"
+path = "src/main.rs"
+
+[dependencies]
+lamula-contract = { path = "../contract" }
+lamula-ingest = { path = "../ingest" }
+lamula-rcp-link = { path = "../rcp-link" }
+lamula-moments = { path = "../moments" }
+tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
+
+[dev-dependencies]
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"

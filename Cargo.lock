@@ -67,6 +67,19 @@ name = "lamula-contract"
 version = "0.1.0"
 
 [[package]]
+name = "lamula-dsp-service"
+version = "0.1.0"
+dependencies = [
+ "lamula-contract",
+ "lamula-ingest",
+ "lamula-moments",
+ "lamula-rcp-link",
+ "lamula-simulator",
+ "rand",
+ "tokio",
+]
+
+[[package]]
 name = "lamula-dual-prf"
 version = "0.1.0"
 dependencies = [
