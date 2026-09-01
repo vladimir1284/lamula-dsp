@@ -23,8 +23,13 @@
 //! Fuera de alcance de este crate (trabajo futuro, ver el plan de ingesta):
 //! codificación de salida al RCP (`dsp_rcp::MomentRay`), plano de
 //! control/config real (setup vs running, self-test), Status & BITE Manager,
-//! archivo de I/Q crudo, conversión de encoder SSI crudo a grados.
+//! archivo de I/Q crudo.
+//!
+//! [`angle`] convierte `azimuth_raw`/`elevation_raw` (cuenta cruda de encoder
+//! SSI) a grados — ver su doc-comment para qué parámetros de ese cálculo
+//! siguen sin dueño (resolución y offset de cero del encoder).
 
+mod angle;
 mod assembly;
 mod error;
 pub mod simulator;
@@ -32,6 +37,7 @@ pub mod tcp;
 pub mod udp;
 mod wire;
 
+pub use angle::ssi_counts_to_deg;
 pub use assembly::{AssembledRadial, RadialAssembler};
 pub use error::IngestError;
 pub use wire::{decode_ray_frame, RawPulseFrame};

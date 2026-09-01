@@ -14,8 +14,9 @@
 //! última puede pertenecer ya a la ráfaga siguiente; `dropped_pulses` deja
 //! constancia del hueco para que una capa de BITE futura decida censurar.
 //! Tampoco convierte `azimuth_raw`/`elevation_raw` (cuentas de encoder SSI) a
-//! grados — no tiene dueño definido todavía
-//! (`docs/algorithms/procesamiento-de-rango.md`).
+//! grados — eso lo hace [`crate::angle::ssi_counts_to_deg`], por separado,
+//! con la resolución y el offset de cero del encoder que quien ensambla el
+//! `MomentRay` deba conocer.
 //!
 //! Asume entrega en orden: TCP lo garantiza; UDP en una LAN conmutada
 //! punto a punto no reordena en la práctica, pero esta versión no detecta

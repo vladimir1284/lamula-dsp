@@ -9,3 +9,9 @@ rust-version.workspace = true
 [dependencies]
 lamula-contract = { path = "../contract" }
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util"] }
+
+[dev-dependencies]
+lamula-ingest = { path = "../ingest" }
+lamula-simulator = { path = "../simulator" }
+lamula-moments = { path = "../moments" }
+rand = "0.8"

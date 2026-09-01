@@ -176,6 +176,10 @@ name = "lamula-rcp-link"
 version = "0.1.0"
 dependencies = [
  "lamula-contract",
+ "lamula-ingest",
+ "lamula-moments",
+ "lamula-simulator",
+ "rand",
  "tokio",
 ]
 

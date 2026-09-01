@@ -4,8 +4,8 @@
 //!
 //! Función pura a propósito: no conoce fase (`setup`/`running`/`fault`) ni
 //! historial de configuración — `not_in_setup_phase` y `not_configured` son
-//! del resorte de quien lleve esa máquina de estados (fuera de este crate,
-//! ver `crate` doc), no de esta validación de datos. Tampoco inventa códigos
+//! del resorte de [`crate::session::Session`], que llama a esta función tras
+//! comprobar la fase, no de esta validación de datos. Tampoco inventa códigos
 //! de rechazo nuevos: el contrato v0.1 no tiene uno para `sweep_mode` o
 //! `clutter_filter` fuera de tabla (a diferencia de `DRx↔DSP`, que sí tiene
 //! `SCAN_MODE_INVALID`/`CELL_MODE_INVALID`); ese es un hueco real del

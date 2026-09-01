@@ -20,27 +20,33 @@
 //!   vigentes y los invariantes físicos que sí están documentados en este
 //!   repositorio (ver el doc-comment del módulo para lo que deliberadamente
 //!   NO comprueba, y por qué).
+//! - [`session`] — máquina de estados `setup`/`running`/`fault`:
+//!   `not_in_setup_phase` y `not_configured`. Función pura sobre su propio
+//!   estado interno; ver el doc-comment del módulo para lo que deja fuera
+//!   (`drx_link_down`, política de cuándo entrar en `fault`).
 //!
 //! Fuera de alcance de este crate (trabajo futuro):
 //!
 //! - Ensamblar un [`wire::MomentBlock`] por radial a partir de la salida de
 //!   `crates/moments`, `crates/quality`, `crates/polarimetry`, etc. Este
 //!   crate sólo sabe empaquetar lo que ya le dan.
-//! - La máquina de estados `setup`/`running`/`fault` (`not_in_setup_phase`,
-//!   `not_configured`) y el Status & BITE Manager que decide cuándo emitir
-//!   cada mensaje `up`. [`validate::validate_config`] es una función pura
-//!   sin estado; quien lleve la fase la llama y decide.
+//! - El Status & BITE Manager que decide cuándo emitir cada mensaje `up` y
+//!   cuándo llamar a [`session::Session::enter_fault`]. `session` sólo hace
+//!   las transiciones mecánicas; la política de cuándo dispararlas no es de
+//!   este crate.
 //! - Adapter en memoria para pruebas sin red, análogo a
 //!   `lamula_ingest::simulator`.
 //! - Reconexión automática si el RCP cierra la conexión: `tcp::spawn` sirve
 //!   una única conexión, igual que `lamula_ingest::tcp`.
 
 mod error;
+pub mod session;
 pub mod tcp;
 pub mod validate;
 pub mod wire;
 
 pub use error::RcpLinkError;
+pub use session::Session;
 pub use tcp::RcpLink;
 pub use validate::validate_config;
 pub use wire::{DownMessage, MomentBlock, UpMessage};
