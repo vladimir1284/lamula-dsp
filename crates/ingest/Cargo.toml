@@ -1,0 +1,17 @@
+[package]
+name = "lamula-ingest"
+description = "Acquisition Abstraction Layer, pipeline de ingesta y ensamblado de radial del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lamula-contract = { path = "../contract" }
+rustfft = "6"
+tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util"] }
+
+[dev-dependencies]
+lamula-simulator = { path = "../simulator" }
+lamula-moments = { path = "../moments" }
+rand = "0.8"
