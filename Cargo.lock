@@ -172,6 +172,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-rcp-link"
+version = "0.1.0"
+dependencies = [
+ "lamula-contract",
+ "tokio",
+]
+
+[[package]]
 name = "lamula-rfi"
 version = "0.1.0"
 dependencies = [

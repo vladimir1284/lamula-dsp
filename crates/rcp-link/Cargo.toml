@@ -1,0 +1,11 @@
+[package]
+name = "lamula-rcp-link"
+description = "Codificación y transporte del contrato DSP↔RCP del LAMULA DSP: mensajes up (momentos, estado, BITE) y decodificación de los down (config, control, autotest)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lamula-contract = { path = "../contract" }
+tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util"] }
