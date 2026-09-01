@@ -43,7 +43,7 @@ async fn control_frame_from_rcp_arrives_decoded() {
     assert_eq!(got, DownMessage::Control(control));
 
     drop(client);
-    drop(link.up);
+    drop(link.up); // soltar `up` es la señal de apagado intencional del enlace
     link.task.await.unwrap().unwrap();
 }
 

@@ -7,10 +7,12 @@
 //! cuando la sesión está en `running` ensambla cada radial y lo emite como
 //! `MomentRay`.
 //!
-//! Asume una única conexión de cada lado y termina cuando las dos se
-//! cierran: hereda esa limitación de `lamula_ingest::tcp`/
-//! `lamula_rcp_link::tcp`, que ya la documentan así; reconectar sin
-//! reiniciar el proceso es trabajo futuro de esos dos crates, no de este.
+//! Tanto `lamula_ingest::tcp` como `lamula_rcp_link::tcp` reconectan solos:
+//! un cierre limpio de cualquiera de los dos lados vuelve a esperar la
+//! próxima conexión sin tirar este proceso ni perder `Session` (fase +
+//! config vigente). Este binario sólo termina si una de esas dos tareas
+//! muere por un fallo real de socket (no una desconexión normal) — en ese
+//! caso no tiene sentido seguir, así que aborta la otra tarea y sale.
 //!
 //! Alcance honesto — lo que este binario deliberadamente NO hace, porque
 //! nada en este workspace lo respalda todavía:
@@ -94,16 +96,13 @@ async fn main() {
     let mut counters = Counters::default();
     let start = tokio::time::Instant::now();
 
-    let mut drx_alive = true;
-    let mut rcp_alive = true;
-
-    while drx_alive || rcp_alive {
+    loop {
         tokio::select! {
-            frame = ingest.frames.recv(), if drx_alive => {
+            frame = ingest.frames.recv() => {
                 let Some(frame) = frame else {
-                    println!("DRx cerró la conexión de ingesta");
-                    drx_alive = false;
-                    continue;
+                    eprintln!("la tarea de ingesta DRx terminó (fallo real, no una desconexión normal)");
+                    link.task.abort();
+                    break;
                 };
                 counters.rays_in += 1;
                 let Some(a) = assembler.as_mut() else {
@@ -136,11 +135,11 @@ async fn main() {
                     }
                 }
             }
-            msg = down.recv(), if rcp_alive => {
+            msg = down.recv() => {
                 let Some(msg) = msg else {
-                    println!("RCP cerró la conexión de control");
-                    rcp_alive = false;
-                    continue;
+                    eprintln!("la tarea del enlace RCP terminó (fallo real, no una desconexión normal)");
+                    ingest.task.abort();
+                    break;
                 };
                 handle_down_message(
                     msg,
@@ -156,19 +155,20 @@ async fn main() {
         }
     }
 
-    if let Err(e) = ingest
-        .task
-        .await
-        .expect("la tarea de ingesta entró en panic")
-    {
-        eprintln!("ingesta terminó con error: {e}");
+    // Cualquiera de las dos puede llegar aquí abortada (la otra terminó
+    // primero por un fallo real): `is_cancelled()` distingue eso de un
+    // panic genuino dentro de la tarea.
+    match ingest.task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("ingesta terminó con error: {e}"),
+        Err(e) if e.is_cancelled() => {}
+        Err(e) => panic!("la tarea de ingesta entró en panic: {e}"),
     }
-    if let Err(e) = link
-        .task
-        .await
-        .expect("la tarea del enlace RCP entró en panic")
-    {
-        eprintln!("enlace RCP terminó con error: {e}");
+    match link.task.await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => eprintln!("enlace RCP terminó con error: {e}"),
+        Err(e) if e.is_cancelled() => {}
+        Err(e) => panic!("la tarea del enlace RCP entró en panic: {e}"),
     }
 }
 

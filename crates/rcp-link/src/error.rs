@@ -17,6 +17,10 @@ pub enum RcpLinkError {
     /// La trama llegó truncada, o `payload_len`/el tamaño del cuerpo no
     /// coincide con el tamaño fijo del mensaje.
     Truncated,
+    /// Sentinela interno de `tcp::spawn`: todos los `Sender<UpMessage>` se
+    /// soltaron (cierre intencional del enlace), no un fallo de socket.
+    /// No debería verse fuera de ese módulo.
+    LinkClosed,
 }
 
 impl fmt::Display for RcpLinkError {
@@ -34,6 +38,7 @@ impl fmt::Display for RcpLinkError {
             }
             RcpLinkError::UnexpectedMsgType(t) => write!(f, "tipo de mensaje inesperado: {t}"),
             RcpLinkError::Truncated => write!(f, "trama truncada o longitud inconsistente"),
+            RcpLinkError::LinkClosed => write!(f, "enlace cerrado intencionalmente"),
         }
     }
 }
