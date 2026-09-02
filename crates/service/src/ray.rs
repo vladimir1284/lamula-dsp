@@ -133,8 +133,19 @@
 //! dentro del propio radial — ver [`staggered_velocity_mps`]) están
 //! cableados. La conversión `Config` → `T1`,`T2` de staggered-PRT
 //! (`staggered_prt_split`) es una inferencia mía sin respaldo de oráculo,
-//! ver su doc-comment. Dealiasing de rango (`lamula-range-dealias`) sigue
-//! sin conectar: `crate::main` documenta por qué.
+//! ver su doc-comment.
+//!
+//! Dealiasing de rango (`config.range_dealias`): sólo el nivel "detección y
+//! marcado" está cableado, cross-radial vía `PreviousPrf` igual que
+//! dual-PRF pero sin depender de `dealias_mode` — ver el doc-comment junto
+//! a `range_dealias_detected` en [`build_moment_ray`], que también explica
+//! por qué NO usa `classify_trip` de `lamula-range-dealias` (inferencia sin
+//! respaldo de oráculo). La recuperación por fase aleatoria en magnetrón
+//! (`lamula_range_dealias::recover_trip1`) sigue sin conectar: necesita fase
+//! de burst por pulso, que el wire `DRx↔DSP` no transporta en ningún campo
+//! (`crate::main` lo documenta), y el contrato tampoco tiene un campo de
+//! hardware (magnetrón vs coherente) con que decidir si esa recuperación
+//! aplicaría — ver "Decisiones cerradas" en `docs/algorithms/roadmap.md`.
 
 use lamula_calibration::power_to_dbz;
 use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
@@ -203,11 +214,12 @@ const GMAP_SIGNAL_MARGIN: f64 = 3.0;
 /// doc-comment del módulo.
 type PolarimetricValues = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
 
-/// Última medida de velocidad pulse-pair (sin desdoblar) de un radial, para
-/// emparejarla con el siguiente en modo dual-PRF. `crate::main` la conserva
-/// entre llamadas a [`build_moment_ray`]; se reinicia junto con el
-/// ensamblador en `START`/`STOP`/`ENTER_SETUP` porque un emparejamiento con
-/// un radial de antes de ese corte no tiene sentido físico.
+/// Última medida de velocidad pulse-pair (sin desdoblar) y reflectividad
+/// cruda (`uz_db`) de un radial, para emparejarla con el siguiente en modo
+/// dual-PRF y en dealiasing de rango. `crate::main` la conserva entre
+/// llamadas a [`build_moment_ray`]; se reinicia junto con el ensamblador en
+/// `START`/`STOP`/`ENTER_SETUP` porque un emparejamiento con un radial de
+/// antes de ese corte no tiene sentido físico.
 ///
 /// `own_prt_s` es el PRT con el que se calculó `velocity_mps` en su momento
 /// — no necesariamente el correcto: si ESE radial fue a su vez el primero
@@ -219,10 +231,16 @@ type PolarimetricValues = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
 /// asumido y esto recupera exactamente el valor que se habría obtenido con
 /// el PRT correcto desde el principio, sin necesidad de guardar la fase
 /// cruda.
+///
+/// `uz_db` no necesita reescalarse igual: es reflectividad, no fase, así
+/// que no depende del PRT asumido — se usa tal cual como referencia sin
+/// plegar para la detección de trip múltiple (ver el doc-comment del rango
+/// de detección en [`build_moment_ray`]).
 pub struct PreviousPrf {
     pub prf_div: u32,
     pub own_prt_s: f64,
     pub velocity_mps: Vec<f32>,
+    pub uz_db: Vec<f32>,
 }
 
 /// `(prt_low_s, prt_high_s, v_a1, v_a2, v_ext)`: periodo y Nyquist de la PRF
@@ -394,6 +412,7 @@ struct ClutterResult {
 /// dominio de potencia total, `R(0)`); dividido entre `M` da el umbral por
 /// bin que pide `gmap_filter`/`moments_from_spectrum`, sin repetir la
 /// estimación.
+#[allow(clippy::too_many_arguments)]
 fn clutter_filtered_power(
     series: &[Complex64],
     raw_s_linear: f64,
@@ -558,7 +577,7 @@ pub fn build_moment_ray(
                 .collect()
         });
 
-    let uz_values: Vec<f32> = quality
+    let mut uz_values: Vec<f32> = quality
         .iter()
         .map(|q| if q.censored { f32::NAN } else { q.uz_db as f32 })
         .collect();
@@ -626,7 +645,7 @@ pub fn build_moment_ray(
         }
     };
 
-    let v_values: Vec<f32> = dealiased_velocity_mps
+    let mut v_values: Vec<f32> = dealiased_velocity_mps
         .iter()
         .zip(&quality)
         .map(|(&v, q)| if q.censored { f32::NAN } else { v })
@@ -655,7 +674,7 @@ pub fn build_moment_ray(
     let radar_constant_db = config.radar_constant_db as f64;
     let start_range_km = config.start_range_m as f64 / 1000.0;
     let gate_spacing_km_cz = config.gate_spacing_m as f64 / 1000.0;
-    let cz_values: Vec<f32> = quality
+    let mut cz_values: Vec<f32> = quality
         .iter()
         .zip(estimates.iter())
         .enumerate()
@@ -686,6 +705,82 @@ pub fn build_moment_ray(
             }
         })
         .collect();
+
+    // Dealiasing de rango, nivel "detección y marcado"
+    // (`docs/algorithms/dealiasing-de-rango.md` §"Cómo funciona", primer
+    // peldaño, disponible en toda instalación). El rol PRF alta/baja se
+    // deriva de `radial.prf_div` con el mismo criterio que `dual_prf_role`
+    // arriba, pero SIN pasar por `dealias_mode`: la vía práctica que la
+    // página describe ("comparar el mismo azimut con dos PRFs distintas, lo
+    // que los modos de corte ya proporcionan") no depende de que el
+    // desdoblado de VELOCIDAD esté en modo dual-PRF, sólo de que el barrido
+    // alterne PRF radial a radial — de ahí el cálculo aparte en vez de
+    // reutilizar `dual_prf_role`.
+    //
+    // **Inferencia sin respaldo de oráculo** (mismo tipo de hueco que
+    // `staggered_prt_split`, ver su doc-comment). Ni `classify_trip` de
+    // `lamula-range-dealias` ni su oráculo (`tools/oracles/
+    // dealiasing_de_rango.ipynb`, "Prueba 1") cubren este caso: los dos
+    // modelan un blanco puntual con posición aparente medida, no la malla
+    // de celdas de eco distribuido que produce un radial meteorológico real
+    // — es literalmente el hueco que documenta `crate::main` para explicar
+    // por qué `classify_trip` no está conectado ("no incluye la detección
+    // de picos que haría falta para usarlo de verdad"). En vez de eso, para
+    // cada celda `n` de un radial de PRF alta con eco detectable
+    // (`uz_values[n]` no censurado), se compara la MISMA celda `n` del
+    // radial de PRF baja anterior (hipótesis trip1: misma posición física,
+    // sin plegar) contra su celda `n + fold_gates` (hipótesis trip2:
+    // posición física `r_n + r_max_alta`, `fold_gates = round(r_max_alta /
+    // gate_spacing_m)`). Si la celda de PRF baja NO tiene eco en la
+    // posición trip1 pero SÍ lo tiene en la posición trip2, esta celda se
+    // marca contaminada — NaN en UZ/CZ/V, `ray_flag::CENSORED` (el
+    // vocabulario que la página señala). Cualquier otra combinación,
+    // incluida la falta de referencia (radial aislado, o `n + fold_gates`
+    // fuera del radial de PRF baja), se deja como trip1: mismo default
+    // conservador que usa `classify_trip` cuando `apparent_low_prf_m` es
+    // `None` — "sin referencia no hay base para acusar solapamiento". No
+    // hay curva de aceptación frente a SNR contrastada para este criterio;
+    // el oráculo sólo la da para su modelo de blanco puntual.
+    let mut range_dealias_detected = false;
+    if config.range_dealias != 0 {
+        let range_dealias_role: Option<bool> = match previous_prf {
+            Some(prev) if prev.prf_div != radial.prf_div => Some(radial.prf_div > prev.prf_div),
+            _ => None,
+        };
+        if let (Some(false), Some(prev)) = (range_dealias_role, previous_prf) {
+            // `Some(false)`: este radial es el de PRF alta (menor
+            // `prf_div`, mismo criterio que `dual_prf_role`); `prev` es el
+            // de PRF baja, referencia sin plegar. Los radiales de PRF baja
+            // no se tocan aquí — su propio `r_max` ya cubre estas celdas
+            // sin ambigüedad, no hay nada que reconciliar.
+            let (_, prt_high, ..) = dual_prf_split(config);
+            let r_max_high_m = SPEED_OF_LIGHT_M_S * prt_high / 2.0;
+            let fold_gates = (r_max_high_m / config.gate_spacing_m as f64).round() as isize;
+            for n in 0..uz_values.len() {
+                if uz_values[n].is_nan() {
+                    continue; // sin eco propio, nada que atribuir
+                }
+                let trip1_has_echo = prev.uz_db.get(n).is_some_and(|v| v.is_finite());
+                if trip1_has_echo {
+                    continue; // referencia trip1 disponible: default conservador
+                }
+                let trip2_has_echo = usize::try_from(n as isize + fold_gates)
+                    .ok()
+                    .and_then(|i| prev.uz_db.get(i))
+                    .is_some_and(|v| v.is_finite());
+                if trip2_has_echo {
+                    uz_values[n] = f32::NAN;
+                    v_values[n] = f32::NAN;
+                    cz_values[n] = f32::NAN;
+                    range_dealias_detected = true;
+                }
+            }
+        }
+    }
+    // Snapshot para `PreviousPrf`: tomado ya con la censura de arriba
+    // aplicada (si corrió), antes de que `uz_values` pueda moverse al
+    // bloque UZ más abajo.
+    let uz_db_for_next = uz_values.clone();
 
     // Sólo hay ρHV/ZDR/ΦDP/KDP con un segundo canal (V) presente en el
     // radial — `channel_mask`/`channels.len()` lo refleja tal cual llega
@@ -750,7 +845,7 @@ pub fn build_moment_ray(
     if first_after_config {
         ray_flags |= ray_flag::FIRST_AFTER_CONFIG;
     }
-    if any_censored {
+    if any_censored || range_dealias_detected {
         ray_flags |= ray_flag::CENSORED;
     }
     if dealias_failed {
@@ -971,6 +1066,7 @@ pub fn build_moment_ray(
         prf_div: radial.prf_div,
         own_prt_s,
         velocity_mps: raw_velocity_mps,
+        uz_db: uz_db_for_next,
     };
 
     (UpMessage::MomentRay { ray, moments }, previous_prf_out)
@@ -1420,6 +1516,111 @@ mod tests {
             (v_block.values[0] as f64 - V_TRUE).abs() < 2.0,
             "V desdoblado ({}) debería acercarse a v_true={V_TRUE}",
             v_block.values[0]
+        );
+    }
+
+    fn generate_channel(cells: &[CellParams], rng: &mut StdRng) -> Vec<Vec<Complex64>> {
+        cells.iter().map(|c| generate_cell(c, rng)).collect()
+    }
+
+    #[test]
+    fn range_dealias_detection_censors_only_trip2_evidenced_cells() {
+        // Reutiliza el par de PRT de `dual_prf_config` (1.2ms/0.8ms, razón
+        // 2:3) pero con `dealias_mode = NONE` y `range_dealias = 1`: prueba
+        // que la detección de trip múltiple corre independiente del modo de
+        // desdoblado de velocidad, tal como describe el doc-comment junto a
+        // `range_dealias_detected` en `build_moment_ray`.
+        let mut config = dual_prf_config();
+        config.dealias_mode = dealias_mode::NONE;
+        config.range_dealias = 1;
+        config.moment_mask = 1 << moment_kind::UZ;
+
+        let (_, prt_high, ..) = dual_prf_split(&config);
+        let r_max_high_m = SPEED_OF_LIGHT_M_S * prt_high / 2.0;
+        config.gate_spacing_m = (r_max_high_m / 3.0) as f32; // fold_gates = 3
+
+        let echo = CellParams {
+            power_s: 1.0,
+            mean_v: 0.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.2e-3,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let noise = CellParams {
+            power_s: 0.0,
+            ..echo
+        };
+
+        let mut rng = StdRng::seed_from_u64(20260902);
+
+        // Radial de PRF baja (prf_div=3, PRT=1.2ms): referencia sin plegar.
+        // idx0=eco (trip1 de la celda 0 de PRF alta); idx1/idx2=ruido (sin
+        // trip1 para las celdas 1/2); idx3=ruido (sin uso directo);
+        // idx4=eco (trip2 de la celda 1); idx5=ruido (sin trip2 para la
+        // celda 2).
+        let low_cells = [
+            CellParams { prt_s: 1.2e-3, ..echo },
+            CellParams { prt_s: 1.2e-3, ..noise },
+            CellParams { prt_s: 1.2e-3, ..noise },
+            CellParams { prt_s: 1.2e-3, ..noise },
+            CellParams { prt_s: 1.2e-3, ..echo },
+            CellParams { prt_s: 1.2e-3, ..noise },
+        ];
+        let low_channel = generate_channel(&low_cells, &mut rng);
+        let mut radial_low = radial_from_channels(vec![low_channel]);
+        radial_low.prf_div = 3;
+
+        // Radial de PRF alta (prf_div=2, PRT=0.8ms): celdas 0-2 con eco
+        // propio; celda 3 sin eco (control: no debe evaluarse pese a no
+        // tener referencia).
+        let high_cells = [
+            CellParams { prt_s: 0.8e-3, ..echo },
+            CellParams { prt_s: 0.8e-3, ..echo },
+            CellParams { prt_s: 0.8e-3, ..echo },
+            CellParams { prt_s: 0.8e-3, ..noise },
+        ];
+        let high_channel = generate_channel(&high_cells, &mut rng);
+        let mut radial_high = radial_from_channels(vec![high_channel]);
+        radial_high.prf_div = 2;
+
+        let (_, previous_prf) =
+            build_moment_ray(&radial_low, &config, 1, false, 1_000_000, 0.0, None);
+        let (msg, _) = build_moment_ray(
+            &radial_high,
+            &config,
+            2,
+            false,
+            1_000_000,
+            0.0,
+            Some(&previous_prf),
+        );
+        let UpMessage::MomentRay { ray, moments } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        let uz = &moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::UZ)
+            .expect("falta el bloque de UZ")
+            .values;
+
+        assert!(
+            uz[0].is_finite(),
+            "celda 0: eco en la posición trip1, no debería censurarse"
+        );
+        assert!(
+            uz[1].is_nan(),
+            "celda 1: sin eco en trip1 pero con eco en trip2, debería censurarse"
+        );
+        assert!(
+            uz[2].is_finite(),
+            "celda 2: sin referencia en ninguna hipótesis, default conservador trip1"
+        );
+        assert_eq!(
+            ray.ray_flags & ray_flag::CENSORED,
+            ray_flag::CENSORED,
+            "detección de trip2 debería marcar ray_flag::CENSORED"
         );
     }
 

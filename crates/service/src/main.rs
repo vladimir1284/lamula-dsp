@@ -28,12 +28,17 @@
 //!   `dealias_unsupported` antes de llegar aquí
 //!   (`lamula_rcp_link::validate::validate_config`). No hay CCOR porque no
 //!   hay filtro de clutter conectado a este binario (el crate
-//!   `lamula-clutter` existe en el workspace, pero no está wireado aquí);
-//!   tampoco hay dealiasing de rango — `lamula-range-dealias` existe en el
-//!   workspace pero no está conectado: `classify_trip` (detección/marcado)
-//!   no incluye la detección de picos que haría falta para usarlo de
-//!   verdad, y `recover_trip1` necesita fase de burst por pulso, que el
-//!   wire `DRx↔DSP` no transporta en ningún campo.
+//!   `lamula-clutter` existe en el workspace, pero no está wireado aquí).
+//!   Dealiasing de rango (`config.range_dealias`) sólo tiene conectado el
+//!   nivel "detección y marcado" (`crate::ray`, cross-radial vía
+//!   `PreviousPrf`, inferencia sin respaldo de oráculo — ver su
+//!   doc-comment); NO usa `classify_trip` de `lamula-range-dealias`, que
+//!   modela un blanco puntual con detección de picos que este pipeline de
+//!   eco distribuido no tiene. La recuperación por fase aleatoria
+//!   (`recover_trip1`, sólo instalaciones de magnetrón) sigue sin conectar:
+//!   necesita fase de burst por pulso, que el wire `DRx↔DSP` no transporta
+//!   en ningún campo, y el contrato tampoco tiene un campo de hardware con
+//!   que decidir si aplicaría.
 //! - Censura por `sig_threshold`/`sqi_threshold`/`log_threshold`, y por
 //!   separado la de ZDR/ρHV/ΦDP/KDP: ver el doc-comment de `crate::ray`.
 //!   `ccor_threshold` no se aplica (no hay CCOR que evaluar). El desdoblado

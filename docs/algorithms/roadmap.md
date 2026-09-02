@@ -175,29 +175,62 @@ la fase 1. Por eso aparece en la fase 1 de la tabla: es el caso que cubre las
 dos configuraciones. Con transmisor coherente la etapa se reduce a monitor de
 potencia y puede quedarse donde el plan la puso.
 
-## Decisiones abiertas
+## Decisiones cerradas
 
-Tres puntos que no se resuelven documentando, sino decidiendo. Se registran aquí
-para que no se pierdan.
+Tres puntos que no se resolvían documentando, sino decidiendo. Quedaron
+abiertos hasta 2026-09-02; esta sección registra la resolución y el trabajo
+que cada una desbloquea, para que no se pierda ninguna de las dos cosas.
 
-**`range_dealias` sin SZ.** El contrato ofrece recuperación de trip múltiple en
-v0.1 y la página de [SZ(8/64)](sz-second-trip-recovery.md) la difiere a Stage 2.
-La postura propuesta es que Stage 1 declare el bit según el hardware: con
-magnetrón hay recuperación real por fase aleatoria, con transmisor coherente y
-sin codificación programable sólo hay detección y marcado. Está desarrollado en
-[dealiasing de rango](dealiasing-de-rango.md).
+**`range_dealias` sin SZ — cerrada: un bit, semántica por hardware.** El
+contrato ofrece recuperación de trip múltiple en v0.1 y la página de
+[SZ(8/64)](sz-second-trip-recovery.md) la difiere a Stage 2. Se ratifica la
+postura que ya proponía esta página: Stage 1 declara el bit `range_dealias`
+(`capability_flag`, valor 16) según el hardware de la instalación —
+magnetrón: recuperación real por fase aleatoria; transmisor coherente sin
+codificación programable: sólo detección y marcado (censura, no corrige). El
+RCP no distingue cuál de las dos hace el DSP detrás del mismo bit. No
+requiere cambio de contrato. El nivel "detección y marcado" ya está cableado
+en `crates/service::ray` (`config.range_dealias`, cross-radial vía
+`PreviousPrf`, independiente de `dealias_mode`) con un criterio de
+emparejamiento celda-a-celda que es **inferencia mía sin respaldo de
+oráculo** — ni `classify_trip` de `lamula-range-dealias` ni su oráculo
+cubren una malla de eco distribuido, sólo un blanco puntual; el doc-comment
+junto a `range_dealias_detected` en `build_moment_ray` explica el criterio
+usado y por qué. La recuperación por fase aleatoria en magnetrón sigue sin
+cablear (ver [dealiasing de rango](dealiasing-de-rango.md) y el doc-comment
+de `crate::main`): falta fase de burst por pulso en el wire, y falta un
+campo de hardware en el contrato con que decidir si aplicaría.
 
-**Modo de polarización de la instalación.** El enum `moment_kind` promete LDR, y
-LDR sólo existe en modo alternante o con un canal cruzado dedicado. El DSP lo
-resuelve por capacidades, pero el equipo del DRx tiene que fijar qué canales
-físicos entrega el `channel_mask` en cada configuración soportada.
+**Modo de polarización de la instalación — cerrada: campo nuevo en el
+contrato.** El enum `moment_kind` promete LDR, y LDR sólo existe en modo
+alternante o con un canal cruzado dedicado. `crates/polarimetry` ya
+implementa `polarimetric_moments_alternating` y `ldr_db`, contrastados
+contra oráculo — el hueco no es de algoritmo, es de contrato: hoy sólo existe
+`n_rx_channels` (conteo), sin campo que diga si ese segundo canal es
+simultáneo (STAR) o alternante H/V, así que `crates/service` sólo cablea el
+caso simultáneo y LDR es inalcanzable en tiempo de ejecución. Se decide
+agregar un campo `polarization_mode` (simultáneo/alternante) al contrato
+`DSP↔RCP`. Pendiente antes de tocar `contract/schema/dsp_rcp_v0_1.toml`:
+acordar con el equipo RCP si esto es parche a v0.1 (el contrato está
+congelado) o entra en v0.2, y regenerar los bindings (`contract/generated/`).
+Esto reemplaza el marco anterior de la decisión ("le corresponde al equipo
+DRx fijar el `channel_mask`"): ese campo sigue sin existir en el esquema —
+la responsabilidad de DRx es el cableado físico de canales, la de este
+contrato es declarar el modo.
 
-**Qué significa exactamente CZ.** Por herencia de Vesta/Sigmet, CZ es la
-reflectividad tras el filtro de clutter y UZ la reflectividad sin filtrar; el
-esquema del contrato no lo dice con esas palabras. Si CZ debiera incluir además
-corrección de atenuación, hace falta un algoritmo que hoy no está en ningún plan
-(Z-PHI, Testud et al. 2000), y eso es alcance nuevo, no una aclaración de
-documentación.
+**Qué significa exactamente CZ — cerrada: se expande a incluir corrección de
+atenuación.** Por herencia de Vesta/Sigmet, CZ era hasta ahora "reflectividad
+tras el filtro de clutter" (`crates/service::ray`, ya implementado); UZ
+sigue siendo la reflectividad sin filtrar. Se decide que CZ incluya además
+corrección de atenuación vía Z-PHI (Testud et al. 2000). Esto es alcance
+nuevo, no una aclaración de documentación: falta la página del algoritmo en
+`docs/algorithms/`, el oráculo en Python bajo `tools/oracles/` (método de
+estudio de esta misma página, primer paso obligatorio antes de tocar Rust),
+y el crate o extensión de `crates/calibration`/`crates/polarimetry` que lo
+implemente — Z-PHI consume el perfil de ΦDP/KDP ya calibrado y necesita su
+propio criterio de aceptación (restricción de autoconsistencia, no sólo
+sesgo). No está en ninguna fase de la tabla de "Orden de trabajo" todavía;
+al planificarlo, encaja después de KDP (fase 3) porque depende de él.
 
 ## Referencias abiertas / implementaciones libres
 
