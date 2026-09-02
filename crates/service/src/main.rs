@@ -288,11 +288,12 @@ async fn handle_down_message(
     }
 }
 
-/// UZ+CZ+V (pulse-pair) más SQI+SIG (censura, `crate::ray`), ZDR+ρHV+ΦDP+KDP
-/// (canal 1, cuando el radial lo trae) y desdoblado dual-PRF/staggered-PRT:
-/// ver el doc-comment de `crate` para por qué no hay más. `max_gates`/`max_pulses`
-/// son el techo del tipo de cable (`n_gates`/`n_pulses` son `u16`), no un
-/// límite de hardware medido — ningún documento del repo da uno real.
+/// UZ+CZ+V (pulse-pair o espectral, `estimator_mask`) más SQI+SIG (censura,
+/// siempre pulse-pair, `crate::ray`), ZDR+ρHV+ΦDP+KDP (canal 1, cuando el
+/// radial lo trae) y desdoblado dual-PRF/staggered-PRT: ver el doc-comment de
+/// `crate` para por qué no hay más. `max_gates`/`max_pulses` son el techo del
+/// tipo de cable (`n_gates`/`n_pulses` son `u16`), no un límite de hardware
+/// medido — ningún documento del repo da uno real.
 fn capabilities() -> Capabilities {
     Capabilities {
         moment_mask: (1 << moment_kind::UZ)
@@ -307,7 +308,7 @@ fn capabilities() -> Capabilities {
         dealias_mask: 1 << dealias_mode::NONE
             | 1 << dealias_mode::DUAL_PRF
             | 1 << dealias_mode::STAGGERED_PRT,
-        estimator_mask: 1 << estimator::PULSE_PAIR,
+        estimator_mask: 1 << estimator::PULSE_PAIR | 1 << estimator::SPECTRAL,
         max_gates: u16::MAX as u32,
         max_pulses: u16::MAX,
         n_rx_channels: 2,

@@ -7,8 +7,12 @@
 //! Momentos: UZ (sin corregir), CZ (corregida, `lamula_calibration`, y
 //! filtrada de RFI/clutter cuando `rfi_filter`/`clutter_filter` están
 //! activos — ver más abajo),
-//! V, SQI y SIG del canal 0 (pulse-pair), CCOR (`lamula_clutter`) cuando hay
-//! filtro de clutter activo, más ZDR/ρHV/ΦDP/KDP cuando el radial trae un
+//! V, SQI y SIG del canal 0 — potencia/velocidad de UZ/CZ/V por pulse-pair o,
+//! con `config.estimator = spectral`
+//! (`docs/algorithms/estimador-espectral.md`), por periodograma
+//! (`lamula_spectral::spectral_moments`); SQI/SIG siguen siendo pulse-pair
+//! siempre, ver el doc-comment de [`gate_quality`] —, CCOR (`lamula_clutter`)
+//! cuando hay filtro de clutter activo, más ZDR/ρHV/ΦDP/KDP cuando el radial trae un
 //! segundo canal (`lamula_polarimetry` en modo simultáneo/STAR, `lamula_kdp`
 //! sobre el ΦDP resultante) — ver el doc-comment de `crate` para por qué no
 //! hay más. `acq_time_utc_ns`/`acq_monotonic_ns` usan el mismo
@@ -150,8 +154,8 @@
 use lamula_calibration::power_to_dbz;
 use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
 use lamula_contract::dsp_rcp::{
-    clutter_filter, data_type, dealias_mode, moment_flag, moment_kind, ray_flag, Config,
-    MomentField, MomentRay,
+    clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind, ray_flag,
+    Config, MomentField, MomentRay,
 };
 use lamula_dual_prf::{continuity_fix, dealias_dual_prf};
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
@@ -162,7 +166,7 @@ use lamula_polarimetry::{polarimetric_moments_simultaneous, PolarimetricFlag};
 use lamula_quality::{sig_db, sqi};
 use lamula_rcp_link::wire::{MomentBlock, UpMessage};
 use lamula_rfi::{detect_rfi_mask, DEFAULT_RFI_MEDIAN_DB, DEFAULT_RFI_WIDTH_MAX_BINS};
-use lamula_spectral::{bin_velocity, hann_window, periodogram_hann};
+use lamula_spectral::{bin_velocity, hann_window, periodogram_hann, spectral_moments};
 use lamula_staggered_prt::staggered_pulse_pair_velocities;
 use rustfft::num_complex::Complex64;
 
@@ -361,9 +365,21 @@ struct GateQuality {
     censored: bool,
 }
 
-fn gate_quality(e: &PulsePairEstimate, config: &Config) -> GateQuality {
-    let uz_db = if e.s_linear > 0.0 {
-        10.0 * e.s_linear.log10()
+/// `power_linear` es la potencia del momento a publicar (`docs/algorithms/
+/// estimador-espectral.md` §"Parámetros del contrato que consume": con
+/// `estimator = spectral` es `SpectralEstimate::power_linear`, no
+/// `e.s_linear`, para que el umbral `log_threshold` decida sobre la misma
+/// potencia que UZ/CZ terminan publicando — ver el doc-comment junto al
+/// cálculo de `primary_power_linear`/`primary_velocity_mps` en
+/// [`build_moment_ray`]). SQI y SIG siguen atados a `e` (autocovarianza
+/// pulse-pair) porque `lamula_quality::sqi`/`sig_db` no tienen definición
+/// espectral en este repo — **inferencia mía sin respaldo de oráculo**: ni
+/// la página del estimador espectral ni su oráculo dicen qué pasa con SQI
+/// cuando `estimator = spectral`, sólo que "los umbrales de censura actúan
+/// igual que con el estimador primario".
+fn gate_quality(power_linear: f64, e: &PulsePairEstimate, config: &Config) -> GateQuality {
+    let uz_db = if power_linear > 0.0 {
+        10.0 * power_linear.log10()
     } else {
         f64::NEG_INFINITY
     };
@@ -534,16 +550,54 @@ pub fn build_moment_ray(
         None => mean_prt_s,
     };
 
-    // UZ/V/SQI/SIG (pulse-pair) sólo corren sobre el canal 0 — H, por
-    // convención del contrato. El canal 1 (V), cuando está presente, sólo
-    // alimenta ZDR/ρHV/ΦDP/KDP más abajo.
+    // UZ/V/SQI/SIG sólo corren sobre el canal 0 — H, por convención del
+    // contrato. El canal 1 (V), cuando está presente, sólo alimenta
+    // ZDR/ρHV/ΦDP/KDP más abajo. El pulse-pair se calcula SIEMPRE, incluso
+    // con `estimator = spectral`: `r0_raw`/`r1_abs`/`noise_floor_estimate`
+    // siguen alimentando SQI/SIG (ver [`gate_quality`]) y el umbral de
+    // ruido del filtro de clutter (`clutter_filtered_power`), ninguno de
+    // los dos con equivalente espectral documentado.
     let estimates: Vec<_> = radial.channels[0]
         .iter()
         .map(|series| pulse_pair_moments(series, wavelength_m, own_prt_s))
         .collect();
     let n_gates = estimates.len() as u16;
 
-    let quality: Vec<GateQuality> = estimates.iter().map(|e| gate_quality(e, config)).collect();
+    // Estimador primario de potencia/velocidad para UZ/CZ/V
+    // (`docs/algorithms/estimador-espectral.md` §"Parámetros del contrato
+    // que consume": `estimator = spectral` lo selecciona). Con
+    // `PULSE_PAIR` esto es exactamente `estimates` reempaquetado; con
+    // `SPECTRAL` se corre `spectral_moments` sobre la misma ráfaga cruda.
+    // Cuando el periodograma no encuentra línea principal por encima del
+    // umbral de ruido (`SpectralFlag::Censored`, `velocity_mps: None`) se
+    // recae en la velocidad de fase del pulse-pair para esa celda en vez de
+    // un valor centinela — mismo criterio de degradación que ya usa
+    // `PulsePairEstimate` cuando `S <= 0` (la fase se calcula igual, sin
+    // pretender que tenga sentido físico) — **inferencia mía sin respaldo
+    // de oráculo**: ni la página del algoritmo ni su oráculo cubren la
+    // interacción con una celda censurada.
+    let (primary_power_linear, primary_velocity_mps): (Vec<f64>, Vec<f64>) =
+        if config.estimator == estimator::SPECTRAL {
+            radial.channels[0]
+                .iter()
+                .zip(estimates.iter())
+                .map(|(series, pp)| {
+                    let se = spectral_moments(series, wavelength_m, own_prt_s);
+                    (se.power_linear, se.velocity_mps.unwrap_or(pp.velocity_mps))
+                })
+                .unzip()
+        } else {
+            (
+                estimates.iter().map(|e| e.s_linear).collect(),
+                estimates.iter().map(|e| e.velocity_mps).collect(),
+            )
+        };
+
+    let quality: Vec<GateQuality> = primary_power_linear
+        .iter()
+        .zip(estimates.iter())
+        .map(|(&p, e)| gate_quality(p, e, config))
+        .collect();
     let any_censored = quality.iter().any(|q| q.censored);
 
     // Filtro de RFI/clutter (GMAP/notch): sólo se corre cuando alguno de los
@@ -581,7 +635,7 @@ pub fn build_moment_ray(
         .iter()
         .map(|q| if q.censored { f32::NAN } else { q.uz_db as f32 })
         .collect();
-    let raw_velocity_mps: Vec<f32> = estimates.iter().map(|e| e.velocity_mps as f32).collect();
+    let raw_velocity_mps: Vec<f32> = primary_velocity_mps.iter().map(|&v| v as f32).collect();
 
     // Con el rol conocido y el radial anterior del mismo número de celdas,
     // se reconcilian las dos medidas (cada una ya escalada con su propio
@@ -663,22 +717,28 @@ pub fn build_moment_ray(
         .collect();
 
     // CZ (`lamula_calibration::power_to_dbz`): misma censura que UZ/V (ver
-    // arriba, `q.censored` ya implica `e.s_linear > 0` — `gate_quality`
-    // fuerza `uz_db = NEG_INFINITY <= log_threshold` en ese caso, así que
-    // nunca llega sin censurar un `s_linear` no positivo a `power_to_dbz`,
-    // que entra en pánico con eso). Guardia aparte: `range_km <= 0.0`
-    // (`start_range_m == 0.0`, valor válido según
+    // arriba, `q.censored` ya implica `primary_power_linear[i] > 0` —
+    // `gate_quality` fuerza `uz_db = NEG_INFINITY <= log_threshold` en ese
+    // caso, así que nunca llega sin censurar una potencia no positiva a
+    // `power_to_dbz`, que entra en pánico con eso). Guardia aparte:
+    // `range_km <= 0.0` (`start_range_m == 0.0`, valor válido según
     // `lamula_rcp_link::validate::validate_config`, sólo lo rechaza si es
     // negativo) — la ecuación del radar no tiene sentido a rango cero, así
-    // que esa celda sale NaN aunque no esté censurada por umbral.
+    // que esa celda sale NaN aunque no esté censurada por umbral. Sin
+    // filtro de clutter/RFI activo, la potencia de referencia es
+    // `primary_power_linear[i]` (pulse-pair o espectral según
+    // `config.estimator`, ver arriba); con filtro activo, el propio
+    // `clutter_filtered_power` ya resuelve en el dominio espectral
+    // independientemente del estimador primario, así que su resultado no
+    // cambia con `config.estimator`.
     let radar_constant_db = config.radar_constant_db as f64;
     let start_range_km = config.start_range_m as f64 / 1000.0;
     let gate_spacing_km_cz = config.gate_spacing_m as f64 / 1000.0;
     let mut cz_values: Vec<f32> = quality
         .iter()
-        .zip(estimates.iter())
+        .zip(primary_power_linear.iter())
         .enumerate()
-        .map(|(i, (q, e))| {
+        .map(|(i, (q, &pl))| {
             let range_km = start_range_km + i as f64 * gate_spacing_km_cz;
             if q.censored || range_km <= 0.0 {
                 return f32::NAN;
@@ -701,7 +761,7 @@ pub fn build_moment_ray(
                         power_to_dbz(r.filtered_power_linear, range_km, radar_constant_db) as f32
                     }
                 }
-                None => power_to_dbz(e.s_linear, range_km, radar_constant_db) as f32,
+                None => power_to_dbz(pl, range_km, radar_constant_db) as f32,
             }
         })
         .collect();
@@ -1140,7 +1200,7 @@ mod tests {
         // uz_db = 0dB, muy por encima de log_threshold.
         let e = estimate(1.0, 1.01, 0.95, 0.01);
         let config = config_with_thresholds(3.0, 0.4, -10.0);
-        let q = gate_quality(&e, &config);
+        let q = gate_quality(e.s_linear, &e, &config);
         assert!(!q.censored);
         assert!(q.sqi_value.unwrap() > 0.4);
         assert!(q.sig_value.unwrap() > 3.0);
@@ -1151,7 +1211,7 @@ mod tests {
         // S=0.02, N=0.01 -> SNR=3.01dB, muy por debajo del umbral (10dB).
         let e = estimate(0.02, 1.03, 0.95, 0.01);
         let config = config_with_thresholds(10.0, 0.0, -100.0);
-        let q = gate_quality(&e, &config);
+        let q = gate_quality(e.s_linear, &e, &config);
         assert!(q.censored, "SNR bajo umbral debería censurar UZ/V");
         assert!(
             q.sig_value.is_some(),
@@ -1165,7 +1225,7 @@ mod tests {
         // SQI bajo: censura por coherencia, no por SNR.
         let e = estimate(1.0, 1.01, 0.05, 0.01);
         let config = config_with_thresholds(3.0, 0.4, -100.0);
-        let q = gate_quality(&e, &config);
+        let q = gate_quality(e.s_linear, &e, &config);
         assert!(q.sqi_value.unwrap() < 0.4);
         assert!(q.censored, "SQI bajo umbral debería censurar UZ/V");
         assert!(q.sig_value.is_some(), "SIG sigue publicado");
@@ -1175,7 +1235,7 @@ mod tests {
     fn cell_with_no_detectable_signal_has_undefined_sig() {
         let e = estimate(0.0, 0.01, 0.005, 0.01);
         let config = config_with_thresholds(3.0, 0.4, -10.0);
-        let q = gate_quality(&e, &config);
+        let q = gate_quality(e.s_linear, &e, &config);
         assert!(q.censored);
         assert!(
             q.sig_value.is_none(),
@@ -2176,6 +2236,105 @@ mod tests {
             ccor.values[0].is_finite(),
             "CCOR debería salir definido con RFI+clutter cableados en el orden correcto, salió {}",
             ccor.values[0]
+        );
+    }
+
+    /// Tono puro exacto en un bin de la FFT: `y[n] = amplitud·e^{i2πk n/M}`.
+    /// Sin ruido añadido, a diferencia de `generate_cell` — aquí interesa un
+    /// valor de verdad-terreno exacto para comparar bit a bit contra una
+    /// llamada directa a `spectral_moments`/`pulse_pair_moments` sobre la
+    /// misma serie, no la exactitud estadística del estimador (eso ya lo
+    /// cubren `crates/spectral/tests/against_oracle.rs` y
+    /// `crates/moments/tests/against_oracle.rs`).
+    fn pure_tone_series(amplitude: f64, bin_idx: usize, m: usize) -> Vec<Complex64> {
+        (0..m)
+            .map(|n| {
+                let theta = 2.0 * std::f64::consts::PI * bin_idx as f64 * n as f64 / m as f64;
+                Complex64::from_polar(amplitude, theta)
+            })
+            .collect()
+    }
+
+    #[test]
+    fn spectral_estimator_routes_uz_v_through_periodogram_not_pulse_pair() {
+        const M: usize = 64;
+        const BIN_IDX: usize = 5;
+        const AMPLITUDE: f64 = 2.0;
+        const WAVELENGTH_M: f64 = 0.10;
+        const PRT_S: f64 = 1.0e-3; // prf_hz = 1000.0, ver config_with_thresholds.
+
+        let y = pure_tone_series(AMPLITUDE, BIN_IDX, M);
+        let radial = radial_from_channels(vec![vec![y.clone()]]);
+
+        // Verdad de referencia: llamar directamente a los dos estimadores
+        // sobre la MISMA serie que ve el radial. El cableo debe reproducir
+        // esto exactamente (salvo redondeo a f32 al pasar por `MomentBlock`);
+        // la exactitud de los estimadores en sí no es lo que se prueba aquí.
+        let pp_truth = pulse_pair_moments(&y, WAVELENGTH_M, PRT_S);
+        let se_truth = spectral_moments(&y, WAVELENGTH_M, PRT_S);
+        let se_v_truth = se_truth
+            .velocity_mps
+            .expect("tono puro muy por encima del umbral de ruido");
+
+        // Umbrales laxos a propósito: esta prueba aísla el cableo del
+        // estimador primario, no la censura por SQI/SIG/log_threshold (ver
+        // las pruebas de `gate_quality` más arriba para eso).
+        let mut config = config_with_thresholds(-100.0, 0.0, -100.0);
+        config.moment_mask = (1 << moment_kind::UZ) | (1 << moment_kind::V);
+        config.wavelength_m = WAVELENGTH_M as f32;
+        config.prf_hz = (1.0 / PRT_S) as f32;
+
+        let moments_for = |estimator_value: u8| -> Vec<MomentBlock> {
+            let mut cfg = config;
+            cfg.estimator = estimator_value;
+            let (msg, _) = build_moment_ray(&radial, &cfg, 1, false, 1_000_000, 0.0, None);
+            let UpMessage::MomentRay { moments, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            moments
+        };
+        let value_of = |moments: &[MomentBlock], kind: u8| -> f32 {
+            moments
+                .iter()
+                .find(|m| m.field.kind == kind)
+                .unwrap_or_else(|| panic!("falta el bloque {kind}"))
+                .values[0]
+        };
+
+        let pp_moments = moments_for(estimator::PULSE_PAIR);
+        let se_moments = moments_for(estimator::SPECTRAL);
+
+        let pp_uz = value_of(&pp_moments, moment_kind::UZ);
+        let pp_v = value_of(&pp_moments, moment_kind::V);
+        let se_uz = value_of(&se_moments, moment_kind::UZ);
+        let se_v = value_of(&se_moments, moment_kind::V);
+
+        assert!(pp_uz.is_finite() && pp_v.is_finite(), "pulse-pair no debería censurar un tono puro");
+        assert!(se_uz.is_finite() && se_v.is_finite(), "el modo espectral no debería censurar un tono puro");
+
+        assert!(
+            (se_v as f64 - se_v_truth).abs() < 1e-4,
+            "V con estimator=spectral ({se_v}) debería coincidir con spectral_moments directo ({se_v_truth})"
+        );
+        assert!(
+            (se_uz as f64 - 10.0 * se_truth.power_linear.log10()).abs() < 1e-4,
+            "UZ con estimator=spectral ({se_uz}) debería coincidir con 10·log10(power_linear) de spectral_moments"
+        );
+        assert!(
+            (pp_v as f64 - pp_truth.velocity_mps).abs() < 1e-4,
+            "V con estimator=pulse_pair no debería cambiar por cablear el modo espectral"
+        );
+
+        // El periodograma con ventana de Hann recorta la línea principal
+        // (`docs/algorithms/estimador-espectral.md` §"Cómo funciona"): con
+        // fugas espectrales fuera de esa ventana, `power_linear` queda por
+        // debajo de la potencia total sin ventanear que usa pulse-pair
+        // (`R(0) = amplitud²`, sin ruido que restar). Si los dos modos
+        // dieran el mismo UZ, `config.estimator` no estaría cambiando la vía
+        // de cómputo.
+        assert!(
+            se_uz < pp_uz,
+            "UZ espectral ({se_uz}) debería quedar por debajo de UZ pulse-pair ({pp_uz}) por el recorte de línea principal; si son iguales, el estimador no se está seleccionando"
         );
     }
 }
