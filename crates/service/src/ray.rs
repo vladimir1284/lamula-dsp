@@ -5,7 +5,8 @@
 //! aplicado a la sesión, no inventados.
 //!
 //! Momentos: UZ (sin corregir), CZ (corregida, `lamula_calibration`, y
-//! filtrada de clutter cuando `clutter_filter` está activo — ver más abajo),
+//! filtrada de RFI/clutter cuando `rfi_filter`/`clutter_filter` están
+//! activos — ver más abajo),
 //! V, SQI y SIG del canal 0 (pulse-pair), CCOR (`lamula_clutter`) cuando hay
 //! filtro de clutter activo, más ZDR/ρHV/ΦDP/KDP cuando el radial trae un
 //! segundo canal (`lamula_polarimetry` en modo simultáneo/STAR, `lamula_kdp`
@@ -66,6 +67,27 @@
 //! filtro corre, pero su varianza a un solo barrido no está contrastada
 //! contra el oráculo.
 //!
+//! Filtro de RFI (`lamula_rfi`, `docs/algorithms/rfi-filtrado.md`): switch
+//! independiente (`rfi_filter`), no supeditado a `clutter_filter`. Cuando
+//! está activo corre sobre el mismo periodograma, ANTES del filtro de
+//! clutter si los dos están activos — una línea de RFI dentro de la banda
+//! de clutter distorsiona el ajuste gaussiano de GMAP (misma página,
+//! "Interacción que hay que resolver explícitamente"). La interpolación
+//! reutiliza `lamula_clutter::gmap_filter` con la máscara de
+//! `lamula_rfi::detect_rfi_mask` en vez de reimplementar el relleno — "el
+//! mismo mecanismo", según la propia página. Con RFI activo y clutter
+//! inactivo, CZ sale corregida de RFI sin que se publique CCOR ni se marque
+//! `ray_flag::CLUTTER_FILTERED` (literalmente "filtrado de clutter", no de
+//! RFI, y el contrato v0.1 no tiene una bandera propia para RFI). Con los
+//! dos activos, el CCOR publicado excluye la potencia que quitó RFI: se
+//! calcula sobre la potencia YA sin RFI, no sobre la cruda, tal como exige
+//! la página ("la potencia retirada por RFI no debe contarse en el
+//! CCOR") — mezclar las dos haría que `ccor_threshold` censurara CZ por el
+//! motivo equivocado. Igual que GMAP, corre sobre un único periodograma sin
+//! promediar (mismo caveat de arriba); la calibración de
+//! `DEFAULT_RFI_MEDIAN_DB`/`DEFAULT_RFI_WIDTH_MAX_BINS` es la del oráculo de
+//! `lamula-rfi`, no repetida aquí.
+//!
 //! ZDR/ρHV/ΦDP tienen su propia censura, independiente de la de arriba: si
 //! `P_h` o `P_v` no superan `MIN_SNR_LIN_POLARIMETRIC` veces su propio ruido
 //! (`lamula_polarimetry::PolarimetricFlag::Censored`), los tres salen NaN y
@@ -110,6 +132,7 @@ use lamula_noise::{censored_by_sig_threshold, snr_db};
 use lamula_polarimetry::{polarimetric_moments_simultaneous, PolarimetricFlag};
 use lamula_quality::{sig_db, sqi};
 use lamula_rcp_link::wire::{MomentBlock, UpMessage};
+use lamula_rfi::{detect_rfi_mask, DEFAULT_RFI_MEDIAN_DB, DEFAULT_RFI_WIDTH_MAX_BINS};
 use lamula_spectral::{bin_velocity, hann_window, periodogram_hann};
 use lamula_staggered_prt::staggered_pulse_pair_velocities;
 use rustfft::num_complex::Complex64;
@@ -339,10 +362,12 @@ struct ClutterResult {
     ccor_db: f64,
 }
 
-/// Cablea GMAP/notch sobre la ráfaga cruda de una celda: periodograma con
-/// ventana de Hann (`lamula_spectral`, reutilizado sin reimplementar),
-/// máscara de clutter centrada en v=0 con anchura `clutter_width_mps` —
-/// pese al nombre del campo del contrato (`clutter_width_ms`), la unidad
+/// Cablea RFI/GMAP/notch sobre la ráfaga cruda de una celda: periodograma
+/// con ventana de Hann (`lamula_spectral`, reutilizado sin reimplementar),
+/// RFI primero si `rfi_filter_enabled` (`lamula_rfi::detect_rfi_mask` +
+/// `gmap_filter` reutilizado como relleno — ver el doc-comment del módulo),
+/// después clutter con máscara centrada en v=0 de anchura `clutter_width_mps`
+/// — pese al nombre del campo del contrato (`clutter_width_ms`), la unidad
 /// documentada en el esquema es m/s, mismo tipo de nombre heredado que
 /// `prf_ratio_num` en [`staggered_prt_split`] — y extracción de momentos
 /// sobre el espectro corregido (`lamula_clutter::moments_from_spectrum`).
@@ -359,6 +384,7 @@ fn clutter_filtered_power(
     prt_s: f64,
     clutter_width_mps: f64,
     filter_mode: u8,
+    rfi_filter_enabled: bool,
 ) -> ClutterResult {
     let m = series.len();
     let win = hann_window(m);
@@ -369,25 +395,49 @@ fn clutter_filtered_power(
         .map(|k| bin_velocity(k, m, wavelength_m, prt_s))
         .collect();
     let n_thresh = noise_floor_estimate / m as f64;
-    let mask: Vec<bool> = v_k
-        .iter()
-        .map(|&v| v.abs() <= clutter_width_mps / 2.0)
-        .collect();
 
-    let filtered_p = if filter_mode == clutter_filter::NOTCH {
-        notch_filter(&p, &mask)
+    // RFI antes que clutter (docs/algorithms/rfi-filtrado.md §"Interacción
+    // que hay que resolver explícitamente"). `ccor_numerator` es la
+    // potencia de referencia para el CCOR de clutter: sin RFI activo, la
+    // cruda de siempre (`raw_s_linear`, pulse-pair); con RFI activo, la
+    // potencia YA sin RFI, para que su corrección no se cuente en el CCOR
+    // de clutter.
+    let (p_for_clutter, ccor_numerator) = if rfi_filter_enabled {
+        let rfi_mask = detect_rfi_mask(&p, DEFAULT_RFI_MEDIAN_DB, DEFAULT_RFI_WIDTH_MAX_BINS);
+        let no_rfi = gmap_filter(&p, &v_k, &rfi_mask, n_thresh, GMAP_SIGNAL_MARGIN).filtered;
+        let post_rfi_power =
+            moments_from_spectrum(&no_rfi, &v_k, bin_spacing, n_thresh).power_linear;
+        (no_rfi, post_rfi_power)
     } else {
-        gmap_filter(&p, &v_k, &mask, n_thresh, GMAP_SIGNAL_MARGIN).filtered
+        (p, raw_s_linear)
+    };
+
+    let clutter_active = filter_mode != clutter_filter::NONE;
+    let filtered_p = if !clutter_active {
+        p_for_clutter.clone()
+    } else {
+        let mask: Vec<bool> = v_k
+            .iter()
+            .map(|&v| v.abs() <= clutter_width_mps / 2.0)
+            .collect();
+        if filter_mode == clutter_filter::NOTCH {
+            notch_filter(&p_for_clutter, &mask)
+        } else {
+            gmap_filter(&p_for_clutter, &v_k, &mask, n_thresh, GMAP_SIGNAL_MARGIN).filtered
+        }
     };
     let filtered_power_linear =
         moments_from_spectrum(&filtered_p, &v_k, bin_spacing, n_thresh).power_linear;
 
-    // `NaN` cuando no está definido: sin señal cruda detectable (mismo
-    // criterio que `sig_db`), o cuando el filtro no deja nada por encima
-    // del ruido — tratar esa "corrección infinita" como indefinida en vez
-    // de publicarla es inferencia mía, ver el doc-comment del módulo.
-    let ccor_db = if raw_s_linear > 0.0 && filtered_power_linear > 0.0 {
-        10.0 * (raw_s_linear / filtered_power_linear).log10()
+    // CCOR sólo tiene sentido con clutter activo -- es por definición "la
+    // corrección atribuible al clutter" (roadmap.md); con RFI activo y
+    // clutter no, no hay CCOR que publicar (ver el doc-comment del módulo).
+    // `NaN` también cuando no está definido con clutter activo: sin señal de
+    // referencia detectable (mismo criterio que `sig_db`), o cuando el
+    // filtro no deja nada por encima del ruido -- tratar esa "corrección
+    // infinita" como indefinida en vez de publicarla es inferencia mía.
+    let ccor_db = if clutter_active && ccor_numerator > 0.0 && filtered_power_linear > 0.0 {
+        10.0 * (ccor_numerator / filtered_power_linear).log10()
     } else {
         f64::NAN
     };
@@ -459,16 +509,18 @@ pub fn build_moment_ray(
     let quality: Vec<GateQuality> = estimates.iter().map(|e| gate_quality(e, config)).collect();
     let any_censored = quality.iter().any(|q| q.censored);
 
-    // Filtro de clutter (GMAP/notch): sólo se corre cuando está activo — es
-    // la etapa más cara del pipeline (una FFT por celda, ver
-    // `docs/algorithms/gmap-clutter-filtering.md` §"Coste de cómputo") — y
-    // sólo afecta a CZ (ver el doc-comment del módulo). `own_prt_s` es el
-    // mismo PRT ya resuelto arriba para el pulse-pair de este radial; en
-    // modo staggered-PRT eso es `mean_prt_s` (`dual_prf_role` es `None`
-    // fuera de `DUAL_PRF`), una aproximación no contrastada contra ningún
-    // oráculo para esa combinación.
+    // Filtro de RFI/clutter (GMAP/notch): sólo se corre cuando alguno de los
+    // dos está activo — es la etapa más cara del pipeline (una FFT por
+    // celda, ver `docs/algorithms/gmap-clutter-filtering.md` §"Coste de
+    // cómputo") — y sólo afecta a CZ (ver el doc-comment del módulo).
+    // `own_prt_s` es el mismo PRT ya resuelto arriba para el pulse-pair de
+    // este radial; en modo staggered-PRT eso es `mean_prt_s`
+    // (`dual_prf_role` es `None` fuera de `DUAL_PRF`), una aproximación no
+    // contrastada contra ningún oráculo para esa combinación.
+    let rfi_filter_enabled = config.rfi_filter != 0;
     let clutter_results: Option<Vec<ClutterResult>> = (config.clutter_filter
-        != clutter_filter::NONE)
+        != clutter_filter::NONE
+        || rfi_filter_enabled)
         .then(|| {
             radial.channels[0]
                 .iter()
@@ -482,6 +534,7 @@ pub fn build_moment_ray(
                         own_prt_s,
                         config.clutter_width_ms as f64,
                         config.clutter_filter,
+                        rfi_filter_enabled,
                     )
                 })
                 .collect()
@@ -598,14 +651,17 @@ pub fn build_moment_ray(
                 // `clutter_filtered_power`): censura propia de CZ,
                 // independiente de `q.censored` y sin marcar
                 // `ray_flag::CENSORED` — mismo criterio que la censura
-                // polarimétrica de arriba.
+                // polarimétrica de arriba. Sólo aplica con clutter activo:
+                // el CCOR (y su umbral) no está definido cuando lo único
+                // activo es RFI — ver el doc-comment del módulo.
                 Some(results) => {
-                    let ccor_db = results[i].ccor_db;
-                    if ccor_db.is_nan() || ccor_db > config.ccor_threshold as f64 {
+                    let r = &results[i];
+                    let ccor_over_threshold = config.clutter_filter != clutter_filter::NONE
+                        && (r.ccor_db.is_nan() || r.ccor_db > config.ccor_threshold as f64);
+                    if ccor_over_threshold {
                         f32::NAN
                     } else {
-                        power_to_dbz(results[i].filtered_power_linear, range_km, radar_constant_db)
-                            as f32
+                        power_to_dbz(r.filtered_power_linear, range_km, radar_constant_db) as f32
                     }
                 }
                 None => power_to_dbz(e.s_linear, range_km, radar_constant_db) as f32,
@@ -682,7 +738,7 @@ pub fn build_moment_ray(
     if dealias_failed {
         ray_flags |= ray_flag::DEALIAS_FAILED;
     }
-    if clutter_results.is_some() {
+    if config.clutter_filter != clutter_filter::NONE {
         ray_flags |= ray_flag::CLUTTER_FILTERED;
     }
 
@@ -778,7 +834,9 @@ pub fn build_moment_ray(
         });
     }
     if let Some(results) = &clutter_results {
-        if config.moment_mask & (1 << moment_kind::CCOR) != 0 {
+        if config.clutter_filter != clutter_filter::NONE
+            && config.moment_mask & (1 << moment_kind::CCOR) != 0
+        {
             let ccor_values: Vec<f32> = results.iter().map(|r| r.ccor_db as f32).collect();
             moments.push(MomentBlock {
                 field: MomentField {
@@ -1578,6 +1636,18 @@ mod tests {
         y
     }
 
+    /// Superpone un tono incoherente con el eco a una ráfaga ya generada —
+    /// mismo mecanismo que `generate_cell_full` en
+    /// `crates/rfi/tests/against_oracle.rs`, sólo que aquí se aplica sobre
+    /// una serie ya en dominio temporal en vez de generarla desde cero.
+    fn add_rfi_tone(y: &mut [Complex64], power_rfi: f64, rfi_bin: usize, phase0: f64) {
+        let m = y.len();
+        for (n, x) in y.iter_mut().enumerate() {
+            let phase = 2.0 * std::f64::consts::PI * rfi_bin as f64 * n as f64 / m as f64 + phase0;
+            *x += Complex64::from_polar(power_rfi.sqrt(), phase);
+        }
+    }
+
     fn clutter_config(clutter_filter_mode: u8, clutter_width_ms: f32, moment_mask: u32) -> Config {
         Config {
             clutter_filter: clutter_filter_mode,
@@ -1690,5 +1760,203 @@ mod tests {
             .find(|m| m.field.kind == moment_kind::CZ)
             .expect("falta el bloque de CZ");
         assert_eq!(cz.field.flags & moment_flag::FILTERED, 0);
+    }
+
+    /// `rfi_filter` solo (sin clutter): CZ debe recuperarse de un tono de
+    /// RFI fuerte y lejano al pico del meteoro, y no debe publicarse CCOR
+    /// ni marcarse `ray_flag::CLUTTER_FILTERED` — el contrato no distingue
+    /// "filtrado de RFI" de "filtrado de clutter" con una bandera propia
+    /// (ver el doc-comment del módulo).
+    #[test]
+    fn rfi_filter_alone_recovers_cz_without_publishing_ccor() {
+        const WAVELENGTH_M: f64 = 0.10;
+        const PRT_S: f64 = 1.0e-3;
+        // M=256, como el oráculo de `crates/rfi` -- a M=64 la varianza de un
+        // único periodograma (sin promediar, ver el doc-comment del módulo)
+        // es demasiado alta para que un tono de RFI se recupere de forma
+        // fiable en una sola realización.
+        const M: usize = 256;
+
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 5.0,
+            sigma_v: 1.5,
+            wavelength_m: WAVELENGTH_M,
+            prt_s: PRT_S,
+            m: M,
+            noise_floor: 0.01,
+        };
+
+        let mut rng_clean = StdRng::seed_from_u64(20260902);
+        let clean = generate_cell(&cell, &mut rng_clean);
+        let mut with_rfi = clean.clone();
+        // Bin lejano al pico del meteoro (v≈5 m/s): tono de RFI 20 dB por
+        // encima del meteoro, mismo `RFI_BIN=200` que la prueba 1 del
+        // oráculo de `crates/rfi`.
+        add_rfi_tone(&mut with_rfi, 100.0, 200, 0.7);
+
+        let clean_radial = radial_from_channels(vec![vec![clean]]);
+        let rfi_radial = radial_from_channels(vec![vec![with_rfi]]);
+        let base = Config {
+            start_range_m: 10_000.0, // lejos del caso borde rango 0
+            ..clutter_config(clutter_filter::NONE, 1.0, CCOR_MOMENTS_MASK)
+        };
+        let config_off = Config {
+            rfi_filter: 0,
+            ..base
+        };
+        let config_on = Config {
+            rfi_filter: 1,
+            ..base
+        };
+
+        let (msg_clean, _) =
+            build_moment_ray(&clean_radial, &config_off, 1, false, 1_000_000, 0.0, None);
+        let (msg_unfiltered, _) =
+            build_moment_ray(&rfi_radial, &config_off, 1, false, 1_000_000, 0.0, None);
+        let (msg_filtered, _) =
+            build_moment_ray(&rfi_radial, &config_on, 1, false, 1_000_000, 0.0, None);
+
+        let cz_of = |msg: UpMessage| -> f32 {
+            let UpMessage::MomentRay { moments, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            moments
+                .iter()
+                .find(|m| m.field.kind == moment_kind::CZ)
+                .expect("falta el bloque de CZ")
+                .values[0]
+        };
+        let ray_flags_of = |msg: &UpMessage| -> u8 {
+            let UpMessage::MomentRay { ray, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            ray.ray_flags
+        };
+        let has_ccor = |msg: &UpMessage| -> bool {
+            let UpMessage::MomentRay { moments, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            moments.iter().any(|m| m.field.kind == moment_kind::CCOR)
+        };
+
+        assert_eq!(
+            ray_flags_of(&msg_filtered) & ray_flag::CLUTTER_FILTERED,
+            0,
+            "RFI solo no es 'filtrado de clutter': no debería marcar ray_flag::CLUTTER_FILTERED"
+        );
+        assert!(
+            !has_ccor(&msg_filtered),
+            "RFI solo no debería publicar CCOR: no hay corrección de clutter que reportar"
+        );
+
+        let cz_clean = cz_of(msg_clean);
+        let cz_unfiltered = cz_of(msg_unfiltered);
+        let cz_filtered = cz_of(msg_filtered);
+
+        let unfiltered_error = (cz_unfiltered - cz_clean).abs();
+        let filtered_error = (cz_filtered - cz_clean).abs();
+        assert!(
+            unfiltered_error > 3.0,
+            "el tono de RFI sin filtrar debería distorsionar CZ de forma medible: limpio={cz_clean} sin_filtrar={cz_unfiltered}"
+        );
+        // Comparación relativa, no un margen absoluto: un solo periodograma
+        // sin promediar (ver "Sin promediado" en el doc-comment del módulo)
+        // tiene varianza alta de por sí, así que lo que importa es que
+        // filtrar RFI acerque mucho más CZ al valor limpio que dejarlo sin
+        // filtrar, no que lo clave con precisión de un estimador promediado.
+        assert!(
+            filtered_error < 0.3 * unfiltered_error,
+            "con rfi_filter activo, CZ debería acercarse mucho más al valor limpio que sin filtrar: limpio={cz_clean} filtrado={cz_filtered} (error {filtered_error:.3}) sin_filtrar={cz_unfiltered} (error {unfiltered_error:.3})"
+        );
+    }
+
+    /// RFI y clutter activos a la vez: el orden (RFI antes que clutter,
+    /// cableado dentro de `clutter_filtered_power`) debe dejar CCOR sano
+    /// -- finito y positivo, con clutter 20 dB más fuerte que el meteoro --
+    /// pese al tono de RFI superpuesto al hombro de la banda de clutter.
+    #[test]
+    fn rfi_and_clutter_together_still_publish_sane_ccor() {
+        const WAVELENGTH_M: f64 = 0.10;
+        const PRT_S: f64 = 1.0e-3;
+        // M=256, mismo tamaño que la prueba 3 del oráculo de `crates/rfi`
+        // (`filtering_rfi_before_clutter_beats_the_reverse_order`), de donde
+        // sale el resto del escenario.
+        const M: usize = 256;
+
+        let v_a = WAVELENGTH_M / (4.0 * PRT_S);
+        let bin_spacing = 2.0 * v_a / M as f64;
+        let clutter_width_mps = (4.0 * bin_spacing) as f32;
+
+        // Bin más cercano a v=4 m/s: dentro del hombro que GMAP usaría para
+        // ajustar el modelo gaussiano de la banda de clutter -- mismo
+        // cálculo que el oráculo.
+        let rfi_bin = (0..M)
+            .min_by(|&a, &b| {
+                let v_a = bin_velocity(a, M, WAVELENGTH_M, PRT_S);
+                let v_b = bin_velocity(b, M, WAVELENGTH_M, PRT_S);
+                (v_a - 4.0).abs().partial_cmp(&(v_b - 4.0).abs()).unwrap()
+            })
+            .unwrap();
+
+        let mut rng = StdRng::seed_from_u64(20260902);
+        let h = generate_cell_with_clutter(
+            1.0,
+            0.0,
+            1.5,
+            100.0,
+            0.05,
+            WAVELENGTH_M,
+            PRT_S,
+            M,
+            &mut rng,
+        );
+        let mut with_rfi = h;
+        // Tono de RFI en el hombro de la banda de clutter (mismo escenario
+        // que la prueba 3 del oráculo de `crates/rfi`).
+        add_rfi_tone(&mut with_rfi, 15.0, rfi_bin, 1.3);
+
+        let radial = radial_from_channels(vec![vec![with_rfi.clone()]]);
+        let base = Config {
+            start_range_m: 10_000.0, // lejos del caso borde rango 0
+            ..clutter_config(clutter_filter::GMAP, clutter_width_mps, CCOR_MOMENTS_MASK)
+        };
+        let config = Config {
+            rfi_filter: 1,
+            ..base
+        };
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { ray, moments } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+
+        assert_eq!(
+            ray.ray_flags & ray_flag::CLUTTER_FILTERED,
+            ray_flag::CLUTTER_FILTERED
+        );
+        let cz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CZ)
+            .expect("falta el bloque de CZ");
+        assert!(
+            cz.values[0].is_finite(),
+            "CZ no debería quedar censurada con RFI+clutter cableados en el orden correcto"
+        );
+        // No se exige un signo concreto: con una banda de clutter tan angosta
+        // (4 bins de 256) y un único periodograma sin promediar ("Sin
+        // promediado", doc-comment del módulo), el resultado exacto del
+        // ajuste de GMAP es sensible a en qué bin discreto cae cada frontera
+        // -- lo que importa aquí es que la composición RFI-antes-que-clutter
+        // corra de punta a punta y publique un CCOR definido, no NaN.
+        let ccor = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CCOR)
+            .expect("falta el bloque de CCOR");
+        assert!(
+            ccor.values[0].is_finite(),
+            "CCOR debería salir definido con RFI+clutter cableados en el orden correcto, salió {}",
+            ccor.values[0]
+        );
     }
 }

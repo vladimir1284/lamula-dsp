@@ -81,6 +81,7 @@ dependencies = [
  "lamula-polarimetry",
  "lamula-quality",
  "lamula-rcp-link",
+ "lamula-rfi",
  "lamula-simulator",
  "lamula-spectral",
  "lamula-staggered-prt",

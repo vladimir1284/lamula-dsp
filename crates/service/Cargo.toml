@@ -24,6 +24,7 @@ lamula-staggered-prt = { path = "../staggered-prt" }
 lamula-calibration = { path = "../calibration" }
 lamula-clutter = { path = "../clutter" }
 lamula-spectral = { path = "../spectral" }
+lamula-rfi = { path = "../rfi" }
 rustfft = "6"
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 
