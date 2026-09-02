@@ -71,6 +71,7 @@ name = "lamula-dsp-service"
 version = "0.1.0"
 dependencies = [
  "lamula-calibration",
+ "lamula-clutter",
  "lamula-contract",
  "lamula-dual-prf",
  "lamula-ingest",
@@ -81,8 +82,10 @@ dependencies = [
  "lamula-quality",
  "lamula-rcp-link",
  "lamula-simulator",
+ "lamula-spectral",
  "lamula-staggered-prt",
  "rand",
+ "rand_distr",
  "rustfft",
  "tokio",
 ]

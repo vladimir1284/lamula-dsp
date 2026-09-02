@@ -16,4 +16,6 @@
 
 mod moments;
 
-pub use moments::{spectral_moments, SpectralEstimate, SpectralFlag};
+pub use moments::{
+    bin_velocity, hann_window, periodogram_hann, spectral_moments, SpectralEstimate, SpectralFlag,
+};

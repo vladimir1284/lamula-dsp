@@ -4,12 +4,13 @@
 //! `noise_floor_dbm`, `radar_constant_db`) tomados aquí del `config` real
 //! aplicado a la sesión, no inventados.
 //!
-//! Momentos: UZ (sin corregir), CZ (corregida, `lamula_calibration`), V,
-//! SQI y SIG del canal 0 (pulse-pair), más ZDR/ρHV/ΦDP/KDP cuando el radial
-//! trae un segundo canal (`lamula_polarimetry` en modo simultáneo/STAR,
-//! `lamula_kdp` sobre el ΦDP resultante) — ver el doc-comment de `crate`
-//! para por qué no hay más (CCOR no se publica porque no hay filtro de
-//! clutter conectado). `acq_time_utc_ns`/`acq_monotonic_ns` usan el mismo
+//! Momentos: UZ (sin corregir), CZ (corregida, `lamula_calibration`, y
+//! filtrada de clutter cuando `clutter_filter` está activo — ver más abajo),
+//! V, SQI y SIG del canal 0 (pulse-pair), CCOR (`lamula_clutter`) cuando hay
+//! filtro de clutter activo, más ZDR/ρHV/ΦDP/KDP cuando el radial trae un
+//! segundo canal (`lamula_polarimetry` en modo simultáneo/STAR, `lamula_kdp`
+//! sobre el ΦDP resultante) — ver el doc-comment de `crate` para por qué no
+//! hay más. `acq_time_utc_ns`/`acq_monotonic_ns` usan el mismo
 //! `timestamp_ns` del DRx para los dos campos: el contrato `DRx↔DSP` sólo
 //! documenta ese campo como "instante del trigger, reloj del DRx", sin
 //! confirmar que sea época UTC — la misma simplificación que ya hace el
@@ -30,8 +31,40 @@
 //! censura: `range_km <= 0` (`start_range_m == 0.0`, valor válido según el
 //! contrato) hace que la ecuación del radar no tenga sentido para esa
 //! celda — ver el comentario junto a `cz_values`.
-//! `ccor_threshold` no se aplica: no hay CCOR que evaluar sin filtro de
-//! clutter conectado (hueco real, no un umbral que se ignore a propósito).
+//! Filtro de clutter (`lamula_clutter`, `docs/algorithms/gmap-clutter-filtering.md`):
+//! GMAP o notch, según `clutter_filter`, sobre el periodograma con ventana
+//! de Hann de la ráfaga cruda (`lamula_spectral::{hann_window,
+//! periodogram_hann, bin_velocity}`, reutilizados sin reimplementar). Por la
+//! semántica que fija `roadmap.md` §"Qué significa exactamente CZ" — UZ es
+//! "sin filtrar", CZ es "tras el filtro de clutter" —, **sólo CZ** consume
+//! la potencia corregida; UZ, V, SQI y SIG siguen viniendo del pulse-pair
+//! crudo sin tocar, filtro activo o no. `CCOR` (`10·log10(potencia
+//! cruda/potencia filtrada)`, vía `lamula_clutter::moments_from_spectrum`
+//! sobre el espectro ya corregido) se publica sólo con filtro activo — sin
+//! filtro no hay corrección que reportar, mismo criterio que los bloques
+//! polarimétricos sin segundo canal. `ccor_threshold` censura CZ (NaN +
+//! `HAS_MISSING`) cuando la corrección excede el umbral o es indefinida
+//! (`ccor_db` sale `NaN` sin señal cruda detectable, o cuando el filtro no
+//! deja nada por encima del ruido — este segundo caso, tratar "corrección
+//! infinita" como indefinida en vez de publicarla, es inferencia mía sin
+//! respaldo de oráculo). Esta censura es independiente de la de
+//! SIG/SQI/LOG de arriba y, mismo criterio que la censura polarimétrica, no
+//! marca `ray_flag::CENSORED` — sí marca `ray_flag::CLUTTER_FILTERED`
+//! siempre que el filtro esté activo, y `moment_flag::FILTERED` en el
+//! bloque de CZ.
+//!
+//! **Sin promediado**: la página del algoritmo documenta que el oráculo
+//! exige promediar varios periodogramas independientes antes del ajuste de
+//! GMAP — "un solo barrido es demasiado ruidoso bin a bin" — y deja esa
+//! responsabilidad al llamador. Este pipeline no tiene con qué promediar
+//! (una ráfaga por celda por radial, sin acumulación entre radiales ni
+//! barridos): se corre sobre un único periodograma, autorizado
+//! explícitamente por el usuario en vez de bloquear el cableo. El
+//! comportamiento contrastado en `crates/clutter/tests/against_oracle.rs`
+//! (recuperación bajo clutter fuerte, curva CSR, degradación acotada sin
+//! clutter) se validó con `K_AVERAGES=10`, no con una sola realización — el
+//! filtro corre, pero su varianza a un solo barrido no está contrastada
+//! contra el oráculo.
 //!
 //! ZDR/ρHV/ΦDP tienen su propia censura, independiente de la de arriba: si
 //! `P_h` o `P_v` no superan `MIN_SNR_LIN_POLARIMETRIC` veces su propio ruido
@@ -64,8 +97,10 @@
 //! sin conectar: `crate::main` documenta por qué.
 
 use lamula_calibration::power_to_dbz;
+use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
 use lamula_contract::dsp_rcp::{
-    data_type, dealias_mode, moment_flag, moment_kind, ray_flag, Config, MomentField, MomentRay,
+    clutter_filter, data_type, dealias_mode, moment_flag, moment_kind, ray_flag, Config,
+    MomentField, MomentRay,
 };
 use lamula_dual_prf::{continuity_fix, dealias_dual_prf};
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
@@ -75,7 +110,9 @@ use lamula_noise::{censored_by_sig_threshold, snr_db};
 use lamula_polarimetry::{polarimetric_moments_simultaneous, PolarimetricFlag};
 use lamula_quality::{sig_db, sqi};
 use lamula_rcp_link::wire::{MomentBlock, UpMessage};
+use lamula_spectral::{bin_velocity, hann_window, periodogram_hann};
 use lamula_staggered_prt::staggered_pulse_pair_velocities;
+use rustfft::num_complex::Complex64;
 
 const SPEED_OF_LIGHT_M_S: f64 = 299_792_458.0;
 
@@ -112,6 +149,14 @@ const KDP_WINDOW_GATES: usize = 15;
 /// mecanismo de continuidad espacial, sólo cambia si recorre radiales
 /// (dual-PRF) o celdas de un mismo radial (staggered).
 const DUAL_PRF_MAX_FOLD_SEARCH: i64 = 3;
+
+/// Margen de selección de bins de señal para el ajuste gaussiano de GMAP
+/// (`lamula_clutter::gmap_filter`, parámetro `margin`). Sin campo propio en
+/// `Config` (mismo tipo de hueco que `RHOHV_THRESHOLD_KDP`); 3.0 es el valor
+/// que usan los tres tests de contraste de
+/// `crates/clutter/tests/against_oracle.rs` contra
+/// `tools/oracles/gmap_clutter_filtering.ipynb`.
+const GMAP_SIGNAL_MARGIN: f64 = 3.0;
 
 /// `(zdr, rhohv, phidp, kdp)` por celda, sólo con segundo canal — ver el
 /// doc-comment del módulo.
@@ -287,6 +332,72 @@ fn gate_quality(e: &PulsePairEstimate, config: &Config) -> GateQuality {
     }
 }
 
+/// Potencia corregida por el filtro de clutter y `CCOR` para una celda —
+/// ver el doc-comment del módulo, sección "Filtro de clutter".
+struct ClutterResult {
+    filtered_power_linear: f64,
+    ccor_db: f64,
+}
+
+/// Cablea GMAP/notch sobre la ráfaga cruda de una celda: periodograma con
+/// ventana de Hann (`lamula_spectral`, reutilizado sin reimplementar),
+/// máscara de clutter centrada en v=0 con anchura `clutter_width_mps` —
+/// pese al nombre del campo del contrato (`clutter_width_ms`), la unidad
+/// documentada en el esquema es m/s, mismo tipo de nombre heredado que
+/// `prf_ratio_num` en [`staggered_prt_split`] — y extracción de momentos
+/// sobre el espectro corregido (`lamula_clutter::moments_from_spectrum`).
+/// `noise_floor_estimate` es el mismo `PulsePairEstimate::noise_floor_estimate`
+/// ya calculado por `pulse_pair_moments` sobre esta misma ráfaga (HS74 en el
+/// dominio de potencia total, `R(0)`); dividido entre `M` da el umbral por
+/// bin que pide `gmap_filter`/`moments_from_spectrum`, sin repetir la
+/// estimación.
+fn clutter_filtered_power(
+    series: &[Complex64],
+    raw_s_linear: f64,
+    noise_floor_estimate: f64,
+    wavelength_m: f64,
+    prt_s: f64,
+    clutter_width_mps: f64,
+    filter_mode: u8,
+) -> ClutterResult {
+    let m = series.len();
+    let win = hann_window(m);
+    let p = periodogram_hann(series, &win);
+    let v_a = wavelength_m / (4.0 * prt_s);
+    let bin_spacing = 2.0 * v_a / m as f64;
+    let v_k: Vec<f64> = (0..m)
+        .map(|k| bin_velocity(k, m, wavelength_m, prt_s))
+        .collect();
+    let n_thresh = noise_floor_estimate / m as f64;
+    let mask: Vec<bool> = v_k
+        .iter()
+        .map(|&v| v.abs() <= clutter_width_mps / 2.0)
+        .collect();
+
+    let filtered_p = if filter_mode == clutter_filter::NOTCH {
+        notch_filter(&p, &mask)
+    } else {
+        gmap_filter(&p, &v_k, &mask, n_thresh, GMAP_SIGNAL_MARGIN).filtered
+    };
+    let filtered_power_linear =
+        moments_from_spectrum(&filtered_p, &v_k, bin_spacing, n_thresh).power_linear;
+
+    // `NaN` cuando no está definido: sin señal cruda detectable (mismo
+    // criterio que `sig_db`), o cuando el filtro no deja nada por encima
+    // del ruido — tratar esa "corrección infinita" como indefinida en vez
+    // de publicarla es inferencia mía, ver el doc-comment del módulo.
+    let ccor_db = if raw_s_linear > 0.0 && filtered_power_linear > 0.0 {
+        10.0 * (raw_s_linear / filtered_power_linear).log10()
+    } else {
+        f64::NAN
+    };
+
+    ClutterResult {
+        filtered_power_linear,
+        ccor_db,
+    }
+}
+
 pub fn build_moment_ray(
     radial: &AssembledRadial,
     config: &Config,
@@ -347,6 +458,34 @@ pub fn build_moment_ray(
 
     let quality: Vec<GateQuality> = estimates.iter().map(|e| gate_quality(e, config)).collect();
     let any_censored = quality.iter().any(|q| q.censored);
+
+    // Filtro de clutter (GMAP/notch): sólo se corre cuando está activo — es
+    // la etapa más cara del pipeline (una FFT por celda, ver
+    // `docs/algorithms/gmap-clutter-filtering.md` §"Coste de cómputo") — y
+    // sólo afecta a CZ (ver el doc-comment del módulo). `own_prt_s` es el
+    // mismo PRT ya resuelto arriba para el pulse-pair de este radial; en
+    // modo staggered-PRT eso es `mean_prt_s` (`dual_prf_role` es `None`
+    // fuera de `DUAL_PRF`), una aproximación no contrastada contra ningún
+    // oráculo para esa combinación.
+    let clutter_results: Option<Vec<ClutterResult>> = (config.clutter_filter
+        != clutter_filter::NONE)
+        .then(|| {
+            radial.channels[0]
+                .iter()
+                .zip(estimates.iter())
+                .map(|(series, e)| {
+                    clutter_filtered_power(
+                        series,
+                        e.s_linear,
+                        e.noise_floor_estimate,
+                        wavelength_m,
+                        own_prt_s,
+                        config.clutter_width_ms as f64,
+                        config.clutter_filter,
+                    )
+                })
+                .collect()
+        });
 
     let uz_values: Vec<f32> = quality
         .iter()
@@ -452,9 +591,24 @@ pub fn build_moment_ray(
         .map(|(i, (q, e))| {
             let range_km = start_range_km + i as f64 * gate_spacing_km_cz;
             if q.censored || range_km <= 0.0 {
-                f32::NAN
-            } else {
-                power_to_dbz(e.s_linear, range_km, radar_constant_db) as f32
+                return f32::NAN;
+            }
+            match &clutter_results {
+                // Corrección excesiva o indefinida (ver
+                // `clutter_filtered_power`): censura propia de CZ,
+                // independiente de `q.censored` y sin marcar
+                // `ray_flag::CENSORED` — mismo criterio que la censura
+                // polarimétrica de arriba.
+                Some(results) => {
+                    let ccor_db = results[i].ccor_db;
+                    if ccor_db.is_nan() || ccor_db > config.ccor_threshold as f64 {
+                        f32::NAN
+                    } else {
+                        power_to_dbz(results[i].filtered_power_linear, range_km, radar_constant_db)
+                            as f32
+                    }
+                }
+                None => power_to_dbz(e.s_linear, range_km, radar_constant_db) as f32,
             }
         })
         .collect();
@@ -528,6 +682,9 @@ pub fn build_moment_ray(
     if dealias_failed {
         ray_flags |= ray_flag::DEALIAS_FAILED;
     }
+    if clutter_results.is_some() {
+        ray_flags |= ray_flag::CLUTTER_FILTERED;
+    }
 
     let moment_flags = |values: &[f32]| -> u8 {
         if values.iter().any(|v| v.is_nan()) {
@@ -537,7 +694,7 @@ pub fn build_moment_ray(
         }
     };
 
-    let mut moments = Vec::with_capacity(9);
+    let mut moments = Vec::with_capacity(10);
     if config.moment_mask & (1 << moment_kind::UZ) != 0 {
         moments.push(MomentBlock {
             field: MomentField {
@@ -602,8 +759,16 @@ pub fn build_moment_ray(
                 // `CORRECTED` va siempre, no sólo cuando el bloque no tiene
                 // NaN: describe que ESTE momento (a diferencia de UZ) lleva
                 // la ecuación del radar aplicada, no el estado de censura
-                // de una celda en particular.
-                flags: moment_flags(&cz_values) | moment_flag::CORRECTED,
+                // de una celda en particular. `FILTERED` igual, cuando el
+                // filtro de clutter está activo (único bloque afectado, ver
+                // el doc-comment del módulo).
+                flags: moment_flags(&cz_values)
+                    | moment_flag::CORRECTED
+                    | if clutter_results.is_some() {
+                        moment_flag::FILTERED
+                    } else {
+                        0
+                    },
                 pad0: 0,
                 n_gates: n_gates as u32,
                 scale: 1.0,
@@ -611,6 +776,23 @@ pub fn build_moment_ray(
             },
             values: cz_values,
         });
+    }
+    if let Some(results) = &clutter_results {
+        if config.moment_mask & (1 << moment_kind::CCOR) != 0 {
+            let ccor_values: Vec<f32> = results.iter().map(|r| r.ccor_db as f32).collect();
+            moments.push(MomentBlock {
+                field: MomentField {
+                    kind: moment_kind::CCOR,
+                    data_type: data_type::F32,
+                    flags: moment_flags(&ccor_values),
+                    pad0: 0,
+                    n_gates: n_gates as u32,
+                    scale: 1.0,
+                    offset: 0.0,
+                },
+                values: ccor_values,
+            });
+        }
     }
     if let Some((zdr_values, rhohv_values, phidp_values, kdp_values)) = polarimetric {
         if config.moment_mask & (1 << moment_kind::ZDR) != 0 {
@@ -1349,5 +1531,164 @@ mod tests {
             "CZ a rango 0 no tiene ecuación del radar válida, aunque la celda no esté censurada"
         );
         assert_eq!(cz.field.flags & moment_flag::HAS_MISSING, moment_flag::HAS_MISSING);
+    }
+
+    use lamula_simulator::gaussian_doppler_spectrum;
+    use rand_distr::{Distribution, StandardNormal};
+    use rustfft::FftPlanner;
+
+    fn complex_gaussian(rng: &mut impl rand::Rng, variance: f64) -> Complex64 {
+        let sigma = (variance / 2.0).sqrt();
+        let re: f64 = StandardNormal.sample(rng);
+        let im: f64 = StandardNormal.sample(rng);
+        Complex64::new(re * sigma, im * sigma)
+    }
+
+    /// Misma `generate_cell_with_clutter` que
+    /// `crates/clutter/tests/against_oracle.rs`: meteoro + clutter casi
+    /// puntual en v=0 (`sigma_v=1e-6`), sin promediar — a diferencia de ese
+    /// test, aquí se ejercita el cableo con una sola ráfaga, el caso real
+    /// del ray builder (ver el doc-comment del módulo, "Sin promediado").
+    #[allow(clippy::too_many_arguments)]
+    fn generate_cell_with_clutter(
+        power_weather: f64,
+        mean_v: f64,
+        sigma_v: f64,
+        power_clutter: f64,
+        noise_floor: f64,
+        wavelength_m: f64,
+        prt_s: f64,
+        m: usize,
+        rng: &mut impl rand::Rng,
+    ) -> Vec<Complex64> {
+        let weather = gaussian_doppler_spectrum(power_weather, mean_v, sigma_v, wavelength_m, prt_s, m);
+        let clutter = gaussian_doppler_spectrum(power_clutter, 0.0, 1e-6, wavelength_m, prt_s, m);
+        let shaped: Vec<Complex64> = weather
+            .iter()
+            .zip(&clutter)
+            .map(|(&w, &c)| complex_gaussian(rng, 1.0) * (w + c).sqrt())
+            .collect();
+        let mut planner = FftPlanner::new();
+        let ifft = planner.plan_fft_inverse(m);
+        let mut y = shaped;
+        ifft.process(&mut y);
+        for x in y.iter_mut() {
+            *x += complex_gaussian(rng, noise_floor);
+        }
+        y
+    }
+
+    fn clutter_config(clutter_filter_mode: u8, clutter_width_ms: f32, moment_mask: u32) -> Config {
+        Config {
+            clutter_filter: clutter_filter_mode,
+            clutter_width_ms,
+            moment_mask,
+            ..config_with_thresholds(3.0, 0.4, -100.0)
+        }
+    }
+
+    const CCOR_MOMENTS_MASK: u32 =
+        (1 << moment_kind::UZ) | (1 << moment_kind::CZ) | (1 << moment_kind::CCOR);
+
+    #[test]
+    fn clutter_filter_active_marks_flags_and_publishes_ccor() {
+        const WAVELENGTH_M: f64 = 0.10;
+        const PRT_S: f64 = 1.0e-3;
+        const M: usize = 64;
+
+        let v_a = WAVELENGTH_M / (4.0 * PRT_S);
+        let bin_spacing = 2.0 * v_a / M as f64;
+        let clutter_width_mps = (4.0 * bin_spacing) as f32;
+
+        let mut rng = StdRng::seed_from_u64(20260902);
+        let h = generate_cell_with_clutter(
+            1.0,   // meteoro
+            0.0,   // superpuesto al clutter, el caso que GMAP tiene que resolver
+            1.5,
+            100.0, // clutter 20 dB más fuerte
+            0.01,
+            WAVELENGTH_M,
+            PRT_S,
+            M,
+            &mut rng,
+        );
+        let radial = radial_from_channels(vec![vec![h]]);
+        let config = clutter_config(clutter_filter::GMAP, clutter_width_mps, CCOR_MOMENTS_MASK);
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { ray, moments } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+
+        assert_eq!(
+            ray.ray_flags & ray_flag::CLUTTER_FILTERED,
+            ray_flag::CLUTTER_FILTERED,
+            "filtro activo debería marcar ray_flag::CLUTTER_FILTERED"
+        );
+
+        let cz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CZ)
+            .expect("falta el bloque de CZ");
+        assert_eq!(
+            cz.field.flags & moment_flag::FILTERED,
+            moment_flag::FILTERED,
+            "CZ debería llevar moment_flag::FILTERED con el filtro activo"
+        );
+
+        let uz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::UZ)
+            .expect("falta el bloque de UZ");
+        assert!(
+            uz.field.flags & moment_flag::FILTERED == 0,
+            "UZ es 'sin filtrar': no debería llevar moment_flag::FILTERED"
+        );
+
+        let ccor = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CCOR)
+            .expect("falta el bloque de CCOR");
+        assert!(
+            ccor.values[0].is_finite() && ccor.values[0] > 0.0,
+            "clutter 20 dB más fuerte que el meteoro debería dar CCOR positivo y finito, salió {}",
+            ccor.values[0]
+        );
+    }
+
+    #[test]
+    fn clutter_filter_none_omits_ccor_and_filtered_flag() {
+        let mut rng = StdRng::seed_from_u64(20260902);
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 3.0,
+            sigma_v: 1.5,
+            wavelength_m: 0.10,
+            prt_s: 1.0e-3,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let h = generate_cell(&cell, &mut rng);
+        let radial = radial_from_channels(vec![vec![h]]);
+        // moment_mask pide CCOR igual, pero sin filtro activo no hay
+        // corrección que reportar -- mismo criterio que los bloques
+        // polarimétricos sin segundo canal.
+        let config = clutter_config(clutter_filter::NONE, 1.0, CCOR_MOMENTS_MASK);
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { ray, moments } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+
+        assert_eq!(ray.ray_flags & ray_flag::CLUTTER_FILTERED, 0);
+        assert!(
+            !moments.iter().any(|m| m.field.kind == moment_kind::CCOR),
+            "sin filtro activo no debería publicarse CCOR aunque el moment_mask lo pida"
+        );
+        let cz = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CZ)
+            .expect("falta el bloque de CZ");
+        assert_eq!(cz.field.flags & moment_flag::FILTERED, 0);
     }
 }

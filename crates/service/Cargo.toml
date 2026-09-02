@@ -22,9 +22,12 @@ lamula-kdp = { path = "../kdp" }
 lamula-dual-prf = { path = "../dual-prf" }
 lamula-staggered-prt = { path = "../staggered-prt" }
 lamula-calibration = { path = "../calibration" }
+lamula-clutter = { path = "../clutter" }
+lamula-spectral = { path = "../spectral" }
+rustfft = "6"
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 
 [dev-dependencies]
 lamula-simulator = { path = "../simulator" }
 rand = "0.8"
-rustfft = "6"
+rand_distr = "0.4"

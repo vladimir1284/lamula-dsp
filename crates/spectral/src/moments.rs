@@ -35,7 +35,11 @@ pub struct SpectralEstimate {
 
 /// Ventana de Hann de `m` muestras, misma convención que `numpy.hanning`:
 /// `w[n] = 0.5 - 0.5·cos(2πn/(M-1))`, simétrica y con extremos nulos.
-fn hann_window(m: usize) -> Vec<f64> {
+///
+/// `pub`: reutilizada por el cableo de GMAP/notch en
+/// `crates/service/src/ray.rs` (`docs/algorithms/gmap-clutter-filtering.md`)
+/// para no reimplementar la ventana de Hann.
+pub fn hann_window(m: usize) -> Vec<f64> {
     assert!(m >= 2, "la ventana de Hann necesita al menos dos muestras");
     let denom = (m - 1) as f64;
     (0..m)
@@ -46,7 +50,9 @@ fn hann_window(m: usize) -> Vec<f64> {
 /// Periodograma ventaneado `P[k] = |FFT(y·win)[k]|^2 / (M·Σwin^2)`,
 /// normalizado para conservar la identidad de Parseval de la potencia de
 /// ruido blanco (misma convención que el oráculo).
-fn periodogram_hann(y: &[Complex64], win: &[f64]) -> Vec<f64> {
+///
+/// `pub`: mismo motivo que [`hann_window`].
+pub fn periodogram_hann(y: &[Complex64], win: &[f64]) -> Vec<f64> {
     let m = y.len();
     let s2: f64 = win.iter().map(|w| w * w).sum();
 
@@ -62,7 +68,9 @@ fn periodogram_hann(y: &[Complex64], win: &[f64]) -> Vec<f64> {
 /// Convierte un índice de bin nativo de la FFT a su velocidad, con la misma
 /// convención de signo que `numpy.fft.fftfreq` / `rustfft`: bins `< half`
 /// son frecuencia positiva, el resto se envuelve a negativa.
-fn bin_velocity(k: usize, m: usize, wavelength_m: f64, prt_s: f64) -> f64 {
+///
+/// `pub`: mismo motivo que [`hann_window`].
+pub fn bin_velocity(k: usize, m: usize, wavelength_m: f64, prt_s: f64) -> f64 {
     let half = m.div_ceil(2);
     let k_signed = if k < half {
         k as i64
