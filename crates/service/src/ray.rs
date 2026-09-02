@@ -88,6 +88,24 @@
 //! `DEFAULT_RFI_MEDIAN_DB`/`DEFAULT_RFI_WIDTH_MAX_BINS` es la del oráculo de
 //! `lamula-rfi`, no repetida aquí.
 //!
+//! **Fragilidad numérica de RFI+clutter combinados, hallada al escribir el
+//! test de este cableo (`rfi_and_clutter_together_still_publish_sane_ccor`)**:
+//! con una banda de clutter angosta (pocos bins de `M`) el resultado del
+//! ajuste gaussiano de GMAP puede depender de en qué bin discreto cae cada
+//! frontera de la máscara — al punto de que una diferencia de redondeo
+//! `f32→f64` de `wavelength_m` (el campo del contrato es `f32`; esta función
+//! trabaja en `f64`) bastó para cambiar la corrección de clutter obtenida
+//! sobre la MISMA ráfaga de prueba, de un CCOR positivo claro a
+//! prácticamente cero. No es un bug de esta implementación: es evidencia de
+//! que el diseño entero — un único periodograma sin promediar, ver "Sin
+//! promediado" arriba — es más sensible de lo que las pruebas con clutter
+//! solo (banda ancha, meteoro superpuesto de lleno) dejan ver. El test
+//! correspondiente por eso sólo exige que el CCOR combinado salga definido
+//! (no `NaN`), no un signo o magnitud concretos — exigir más ahí sería
+//! afirmar una precisión que el diseño sin promediado no respalda. Repromediar
+//! sobre varios barridos (la limitación real, no ésta) resolvería esto de
+//! raíz al suavizar el periodograma antes del ajuste.
+//!
 //! ZDR/ρHV/ΦDP tienen su propia censura, independiente de la de arriba: si
 //! `P_h` o `P_v` no superan `MIN_SNR_LIN_POLARIMETRIC` veces su propio ruido
 //! (`lamula_polarimetry::PolarimetricFlag::Censored`), los tres salen NaN y
