@@ -155,21 +155,24 @@ use lamula_attenuation::zphi_correct_dbz;
 use lamula_calibration::power_to_dbz;
 use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
 use lamula_contract::dsp_rcp::{
-    clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind, ray_flag,
-    Config, MomentField, MomentRay,
+    clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind,
+    polarization_mode, ray_flag, Config, MomentField, MomentRay,
 };
 use lamula_dual_prf::{continuity_fix, dealias_dual_prf};
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
 use lamula_kdp::{kdp_window_fit, unwrap_deg};
 use lamula_moments::{pulse_pair_moments, PulsePairEstimate};
 use lamula_noise::{censored_by_sig_threshold, snr_db};
-use lamula_polarimetry::{polarimetric_moments_simultaneous, PolarimetricFlag};
+use lamula_polarimetry::{
+    ldr_db, polarimetric_moments_alternating, polarimetric_moments_simultaneous, PolarimetricFlag,
+};
 use lamula_quality::{sig_db, sqi};
 use lamula_rcp_link::wire::{MomentBlock, UpMessage};
 use lamula_rfi::{detect_rfi_mask, DEFAULT_RFI_MEDIAN_DB, DEFAULT_RFI_WIDTH_MAX_BINS};
 use lamula_spectral::{bin_velocity, hann_window, periodogram_hann, spectral_moments};
 use lamula_staggered_prt::staggered_pulse_pair_velocities;
 use rustfft::num_complex::Complex64;
+use std::borrow::Cow;
 
 const SPEED_OF_LIGHT_M_S: f64 = 299_792_458.0;
 
@@ -233,13 +236,23 @@ const ZPHI_BETA: f64 = 0.64884;
 /// que exista ese campo o una constante de configuración local real.
 const ZPHI_A_COEF_DB_PER_DEG: f64 = 0.08;
 
-/// `(zdr, rhohv, phidp, kdp, phidp_unwrapped)` por celda, sólo con segundo
-/// canal — ver el doc-comment del módulo. `phidp_unwrapped` (grados, la
-/// misma serie que ya usa `kdp_window_fit`) se conserva aparte de `phidp`
+/// `(zdr, rhohv, phidp, kdp, phidp_unwrapped, ldr)` por celda, sólo con
+/// segundo canal — ver el doc-comment del módulo. `phidp_unwrapped` (grados,
+/// la misma serie que ya usa `kdp_window_fit`) se conserva aparte de `phidp`
 /// (que sale módulo 360°, tal cual mide `lamula_polarimetry`) porque la
 /// corrección de atenuación Z-PHI necesita el ΔΦDP de un tramo completo, no
-/// el valor de una sola celda — ver su uso más abajo.
-type PolarimetricValues = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f64>);
+/// el valor de una sola celda — ver su uso más abajo. `ldr` es `None` en modo
+/// simultáneo (no hay canal cruzado con que estimarlo, ver
+/// `docs/algorithms/polarimetria-covarianzas.md` §"Configuraciones
+/// cubiertas"); `Some(_)` sólo en modo alternante.
+type PolarimetricValues = (
+    Vec<f32>,
+    Vec<f32>,
+    Vec<f32>,
+    Vec<f32>,
+    Vec<f64>,
+    Option<Vec<f32>>,
+);
 
 /// Última medida de velocidad pulse-pair (sin desdoblar) y reflectividad
 /// cruda (`uz_db`) de un radial, para emparejarla con el siguiente en modo
@@ -573,16 +586,47 @@ pub fn build_moment_ray(
         None => mean_prt_s,
     };
 
-    // UZ/V/SQI/SIG sólo corren sobre el canal 0 — H, por convención del
-    // contrato. El canal 1 (V), cuando está presente, sólo alimenta
-    // ZDR/ρHV/ΦDP/KDP más abajo. El pulse-pair se calcula SIEMPRE, incluso
-    // con `estimator = spectral`: `r0_raw`/`r1_abs`/`noise_floor_estimate`
-    // siguen alimentando SQI/SIG (ver [`gate_quality`]) y el umbral de
-    // ruido del filtro de clutter (`clutter_filtered_power`), ninguno de
-    // los dos con equivalente espectral documentado.
-    let estimates: Vec<_> = radial.channels[0]
+    // Modo alternante H/V: UZ/V/SQI/SIG (y, más abajo, el estimador
+    // espectral alternativo y el filtro de clutter/RFI) NO pueden correr
+    // sobre `radial.channels[0]` entero — esa serie intercala pulsos
+    // transmitidos en H y en V pulso a pulso, y la autocovarianza de
+    // retardo 1 se contaminaría con ZDR (`docs/algorithms/roadmap.md`
+    // §"Decisiones cerradas", ítem "Modo de polarización de la
+    // instalación", punto (2)). `main_channel` es la subserie copolar H
+    // (paridad `TX_POL_V` = 0 de `channels[0]`) en modo alternante, o el
+    // canal 0 completo en cualquier otro modo — el único consumidor de "el
+    // canal 0, tal cual" en todo este bloque. Su PRT propio es el doble del
+    // nominal (se salta un pulso de cada dos), de ahí `own_prt_for_main`.
+    // **Sin contrastar contra oráculo** para la combinación alternante +
+    // `estimator = spectral` o alternante + filtro de clutter/RFI: ningún
+    // oráculo de este repositorio cubre esa interacción, sólo la del
+    // pulse-pair primario (ítem (2) del roadmap).
+    let alternating =
+        config.polarization_mode == polarization_mode::ALTERNATING && radial.channels.len() > 1;
+    let main_channel: Vec<Cow<[Complex64]>> = radial.channels[0]
         .iter()
-        .map(|series| pulse_pair_moments(series, wavelength_m, own_prt_s))
+        .map(|series| {
+            if alternating {
+                Cow::Owned(radial.split_by_tx_polarization(series).0)
+            } else {
+                Cow::Borrowed(series.as_slice())
+            }
+        })
+        .collect();
+    let own_prt_for_main = if alternating { own_prt_s * 2.0 } else { own_prt_s };
+
+    // UZ/V/SQI/SIG sólo corren sobre el canal 0 — H, por convención del
+    // contrato (en modo alternante, su subserie copolar `main_channel`, ver
+    // arriba). El canal 1 (V), cuando está presente, sólo alimenta
+    // ZDR/ρHV/ΦDP/KDP/LDR más abajo. El pulse-pair se calcula SIEMPRE,
+    // incluso con `estimator = spectral`: `r0_raw`/`r1_abs`/
+    // `noise_floor_estimate` siguen alimentando SQI/SIG (ver
+    // [`gate_quality`]) y el umbral de ruido del filtro de clutter
+    // (`clutter_filtered_power`), ninguno de los dos con equivalente
+    // espectral documentado.
+    let estimates: Vec<_> = main_channel
+        .iter()
+        .map(|series| pulse_pair_moments(series, wavelength_m, own_prt_for_main))
         .collect();
     let n_gates = estimates.len() as u16;
 
@@ -601,11 +645,11 @@ pub fn build_moment_ray(
     // interacción con una celda censurada.
     let (primary_power_linear, primary_velocity_mps): (Vec<f64>, Vec<f64>) =
         if config.estimator == estimator::SPECTRAL {
-            radial.channels[0]
+            main_channel
                 .iter()
                 .zip(estimates.iter())
                 .map(|(series, pp)| {
-                    let se = spectral_moments(series, wavelength_m, own_prt_s);
+                    let se = spectral_moments(series, wavelength_m, own_prt_for_main);
                     (se.power_linear, se.velocity_mps.unwrap_or(pp.velocity_mps))
                 })
                 .unzip()
@@ -627,8 +671,8 @@ pub fn build_moment_ray(
     // dos está activo — es la etapa más cara del pipeline (una FFT por
     // celda, ver `docs/algorithms/gmap-clutter-filtering.md` §"Coste de
     // cómputo") — y sólo afecta a CZ (ver el doc-comment del módulo).
-    // `own_prt_s` es el mismo PRT ya resuelto arriba para el pulse-pair de
-    // este radial; en modo staggered-PRT eso es `mean_prt_s`
+    // `own_prt_for_main` es el mismo PRT ya resuelto arriba para el
+    // pulse-pair de este radial; en modo staggered-PRT eso es `mean_prt_s`
     // (`dual_prf_role` es `None` fuera de `DUAL_PRF`), una aproximación no
     // contrastada contra ningún oráculo para esa combinación.
     let rfi_filter_enabled = config.rfi_filter != 0;
@@ -636,7 +680,7 @@ pub fn build_moment_ray(
         != clutter_filter::NONE
         || rfi_filter_enabled)
         .then(|| {
-            radial.channels[0]
+            main_channel
                 .iter()
                 .zip(estimates.iter())
                 .map(|(series, e)| {
@@ -645,7 +689,7 @@ pub fn build_moment_ray(
                         e.s_linear,
                         e.noise_floor_estimate,
                         wavelength_m,
-                        own_prt_s,
+                        own_prt_for_main,
                         config.clutter_width_ms as f64,
                         config.clutter_filter,
                         rfi_filter_enabled,
@@ -865,22 +909,71 @@ pub fn build_moment_ray(
     // bloque UZ más abajo.
     let uz_db_for_next = uz_values.clone();
 
-    // Sólo hay ρHV/ZDR/ΦDP/KDP con un segundo canal (V) presente en el
-    // radial — `channel_mask`/`channels.len()` lo refleja tal cual llega
-    // del DRx.
+    // Sólo hay ρHV/ZDR/ΦDP/KDP (y, en modo alternante, LDR) con un segundo
+    // canal (V) presente en el radial — `channel_mask`/`channels.len()` lo
+    // refleja tal cual llega del DRx.
     let polarimetric: Option<PolarimetricValues> = (radial.channels.len() > 1)
         .then(|| {
             let mut zdr = Vec::with_capacity(n_gates as usize);
             let mut rhohv = Vec::with_capacity(n_gates as usize);
             let mut phidp = Vec::with_capacity(n_gates as usize);
-            for (h, v) in radial.channels[0].iter().zip(radial.channels[1].iter()) {
-                let est = polarimetric_moments_simultaneous(
-                    h,
-                    v,
-                    config.zdr_offset_db as f64,
-                    config.phidp_offset_deg as f64,
-                    MIN_SNR_LIN_POLARIMETRIC,
-                );
+            let mut ldr: Vec<f32> = Vec::with_capacity(n_gates as usize);
+            for (i, (h, v)) in radial.channels[0]
+                .iter()
+                .zip(radial.channels[1].iter())
+                .enumerate()
+            {
+                let est = if alternating {
+                    // `hh` es exactamente `main_channel[i]` — la misma
+                    // subserie copolar H que ya alimentó el pulse-pair
+                    // principal más arriba, no una segunda llamada a
+                    // `split_by_tx_polarization` con su propio recorte.
+                    // `vh` (cruzada, tx=H) y `vv` (copolar V, tx=V) salen de
+                    // partir `channels[1]` por la misma paridad.
+                    let hh = main_channel[i].as_ref();
+                    let (vh, vv) = radial.split_by_tx_polarization(v);
+                    // `sigma_v_mps`: ancho espectral ya estimado por el
+                    // pulse-pair principal sobre esta misma celda —
+                    // exactamente el hueco que el ítem (4) de
+                    // `docs/algorithms/roadmap.md` §"Decisiones cerradas"
+                    // dejaba pendiente. `0.0` cuando el pulse-pair no lo
+                    // definió (`Censored`): sin ensanchamiento espectral
+                    // documentado que asumir en ese caso, mismo criterio de
+                    // "no inventar" que el resto del módulo.
+                    let sigma_v_mps = estimates[i].spectrum_width_mps.unwrap_or(0.0);
+                    let est = polarimetric_moments_alternating(
+                        hh,
+                        &vv,
+                        config.zdr_offset_db as f64,
+                        config.phidp_offset_deg as f64,
+                        sigma_v_mps,
+                        wavelength_m,
+                        own_prt_s,
+                        MIN_SNR_LIN_POLARIMETRIC,
+                    );
+                    // LDR censurado a NaN si la celda ya está censurada por
+                    // SNR (mismo criterio que ZDR/ρHV/ΦDP) o si cae por
+                    // debajo del margen de aislamiento de antena
+                    // (`LdrEstimate::reliable`) — publicarlo sin fiabilidad
+                    // es "engañoso", como dice la página del algoritmo.
+                    let ldr_est = ldr_db(hh, &vh, config.antenna_isolation_db as f64);
+                    ldr.push(
+                        if est.flag == PolarimetricFlag::Ok && ldr_est.reliable {
+                            ldr_est.ldr_db as f32
+                        } else {
+                            f32::NAN
+                        },
+                    );
+                    est
+                } else {
+                    polarimetric_moments_simultaneous(
+                        h,
+                        v,
+                        config.zdr_offset_db as f64,
+                        config.phidp_offset_deg as f64,
+                        MIN_SNR_LIN_POLARIMETRIC,
+                    )
+                };
                 let (z, r, p) = match est.flag {
                     PolarimetricFlag::Ok => {
                         (est.zdr_db as f32, est.rhohv as f32, est.phidp_deg as f32)
@@ -913,7 +1006,14 @@ pub fn build_moment_ray(
                 .map(|k| k.map(|v| v as f32).unwrap_or(f32::NAN))
                 .collect();
 
-            (zdr, rhohv, phidp, kdp, phidp_unwrapped)
+            (
+                zdr,
+                rhohv,
+                phidp,
+                kdp,
+                phidp_unwrapped,
+                alternating.then_some(ldr),
+            )
         });
 
     // Corrección de atenuación Z-PHI sobre CZ (Testud et al. 2000, ver
@@ -933,7 +1033,7 @@ pub fn build_moment_ray(
     // rayos que combinan varios parches de lluvia y huecos censurados; el
     // criterio de segmentación es el más simple que respeta "censura, no
     // corrige" sobre lo que no se puede medir con confianza.
-    if let Some((_, _, _, _, phidp_unwrapped)) = &polarimetric {
+    if let Some((_, _, _, _, phidp_unwrapped, _)) = &polarimetric {
         let gate_spacing_km = config.gate_spacing_m as f64 / 1000.0;
         let mut run_start: Option<usize> = None;
         for i in 0..=cz_values.len() {
@@ -1100,7 +1200,8 @@ pub fn build_moment_ray(
             });
         }
     }
-    if let Some((zdr_values, rhohv_values, phidp_values, kdp_values, _)) = polarimetric {
+    if let Some((zdr_values, rhohv_values, phidp_values, kdp_values, _, ldr_values)) = polarimetric
+    {
         if config.moment_mask & (1 << moment_kind::ZDR) != 0 {
             moments.push(MomentBlock {
                 field: MomentField {
@@ -1157,6 +1258,22 @@ pub fn build_moment_ray(
                 values: kdp_values,
             });
         }
+        if let Some(ldr_values) = ldr_values {
+            if config.moment_mask & (1 << moment_kind::LDR) != 0 {
+                moments.push(MomentBlock {
+                    field: MomentField {
+                        kind: moment_kind::LDR,
+                        data_type: data_type::F32,
+                        flags: moment_flags(&ldr_values),
+                        pad0: 0,
+                        n_gates: n_gates as u32,
+                        scale: 1.0,
+                        offset: 0.0,
+                    },
+                    values: ldr_values,
+                });
+            }
+        }
     }
 
     let ray = MomentRay {
@@ -1187,10 +1304,17 @@ pub fn build_moment_ray(
         // Dual-PRF y staggered-PRT publican la Nyquist EXTENDIDA (doc de
         // cada algoritmo, §"Parámetros del contrato que consume"), no la de
         // un solo periodo.
+        // La rama "_" es el caso NONE (u otro modo de dealiasing futuro):
+        // con polarización alternante, `own_prt_for_main` ya trae el PRT
+        // doblado (PRF efectiva a la mitad, `docs/algorithms/
+        // polarimetria-covarianzas.md` §"Configuraciones cubiertas"), así
+        // que la Nyquist sale reducida a la mitad sin rama aparte.
+        // Combinación alternante + `DUAL_PRF`/`STAGGERED_PRT` sin
+        // contrastar — ninguna de esas dos ramas usa `own_prt_for_main`.
         nyquist_velocity: match config.dealias_mode {
             dealias_mode::DUAL_PRF => dual_prf_split(config).4 as f32,
             dealias_mode::STAGGERED_PRT => staggered_prt_split(config).4 as f32,
-            _ => (wavelength_m / (4.0 * mean_prt_s)) as f32,
+            _ => (wavelength_m / (4.0 * own_prt_for_main)) as f32,
         },
         unambiguous_range_m: (SPEED_OF_LIGHT_M_S / (2.0 * config.prf_hz as f64)) as f32,
         noise_floor_dbm: config.noise_floor_dbm,
@@ -1321,6 +1445,7 @@ mod tests {
         );
     }
 
+    use lamula_contract::drx_dsp::ray_flag as tx_ray_flag;
     use lamula_simulator::{generate_cell, generate_dual_pol_cell, CellParams, DualPolParams};
     use rand::rngs::StdRng;
     use rand::SeedableRng;
@@ -1410,6 +1535,143 @@ mod tests {
             .find(|m| m.field.kind == moment_kind::KDP)
             .expect("falta el bloque de KDP");
         assert!(kdp_block.values[0].is_nan());
+    }
+
+    #[test]
+    fn alternating_polarization_wiring_uses_split_subsequences_not_naive_simultaneous() {
+        // Patrón de transmisión H,V,H,V,H,V,H,V (`ray_flag::TX_POL_V` marca
+        // los pulsos V). `channels[0]` es el receptor H fijo, `channels[1]`
+        // el receptor V fijo (`docs/algorithms/roadmap.md` §"Decisiones
+        // cerradas", ítem "Modo de polarización de la instalación"): en los
+        // pulsos H, `channels[0]` mide copolar HH y `channels[1]` cruzada VH;
+        // en los pulsos V, al revés (HV cruzada en `channels[0]`, VV copolar
+        // en `channels[1]`).
+        // 32 pulsos (16 H, 16 V) en vez de 4 por subserie: con amplitud
+        // perfectamente constante, HS74 (`crates/noise::hs74`) mide un suelo
+        // de ruido EXACTAMENTE cero (periodograma degenerado, un solo bin no
+        // nulo) y `snr_db` entra en pánico contra eso — el jitter de abajo
+        // (±2%, determinista, sin RNG) evita esa degeneración sin mover la
+        // potencia media lo bastante como para invalidar los valores
+        // esperados a mano.
+        let n_pulses = 32usize;
+        let jitter = |base: f64, i: usize| -> Complex64 {
+            Complex64::new(base * (1.0 + 0.02 * ((i % 3) as f64 - 1.0)), 0.0)
+        };
+        let ray_flags: Vec<u8> = (0..n_pulses)
+            .map(|i| if i % 2 == 1 { tx_ray_flag::TX_POL_V } else { 0 })
+            .collect();
+        let ch0_bin0: Vec<Complex64> = (0..n_pulses)
+            .map(|i| {
+                if i % 2 == 0 {
+                    jitter(1.0, i) // H tx: HH
+                } else {
+                    jitter(0.3, i) // V tx: HV (cruzada, no usada)
+                }
+            })
+            .collect();
+        let ch1_bin0: Vec<Complex64> = (0..n_pulses)
+            .map(|i| {
+                if i % 2 == 0 {
+                    jitter(0.3, i) // H tx: VH (cruzada)
+                } else {
+                    jitter(0.5, i) // V tx: VV
+                }
+            })
+            .collect();
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: 0b0011,
+            channels: vec![vec![ch0_bin0], vec![ch1_bin0]],
+            ray_flags,
+            dropped_pulses: 0,
+        };
+
+        let moment_mask = ALL_MOMENTS_MASK | (1 << moment_kind::LDR);
+        let base_config = polarimetric_config(moment_mask);
+        let alternating_config = Config {
+            polarization_mode: polarization_mode::ALTERNATING,
+            antenna_isolation_db: 30.0,
+            ..base_config
+        };
+        let simultaneous_config = Config {
+            polarization_mode: polarization_mode::SIMULTANEOUS,
+            antenna_isolation_db: 30.0,
+            ..base_config
+        };
+
+        let (alt_msg, _) =
+            build_moment_ray(&radial, &alternating_config, 1, false, 1_000_000, 0.0, None);
+        let (naive_msg, _) =
+            build_moment_ray(&radial, &simultaneous_config, 1, false, 1_000_000, 0.0, None);
+
+        fn zdr_of(msg: &UpMessage) -> f32 {
+            let UpMessage::MomentRay { moments, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            moments
+                .iter()
+                .find(|m| m.field.kind == moment_kind::ZDR)
+                .expect("falta el bloque de ZDR")
+                .values[0]
+        }
+
+        let alt_zdr = zdr_of(&alt_msg);
+        let naive_zdr = zdr_of(&naive_msg);
+
+        // Valor correcto de ZDR: sólo con la subserie copolar (hh=1.0,
+        // vv=0.5), sin la fuga cruzada de por medio -> 10*log10(1/0.25).
+        assert!(
+            (alt_zdr - 6.0206).abs() < 0.05,
+            "ZDR alternante = {alt_zdr}, se esperaba ~6.02 dB"
+        );
+        // El cómputo ingenuo (simultáneo sobre la serie intercalada) mezcla
+        // HH+HV en el canal H y VH+VV en el canal V: sale un valor distinto
+        // — el error clásico que señala `docs/algorithms/
+        // polarimetria-covarianzas.md` §"Configuraciones cubiertas".
+        assert!(
+            (alt_zdr - naive_zdr).abs() > 0.5,
+            "alternante ({alt_zdr}) y simultáneo ingenuo ({naive_zdr}) deberían diferir"
+        );
+
+        let UpMessage::MomentRay {
+            moments: alt_moments,
+            ..
+        } = &alt_msg
+        else {
+            panic!("se esperaba MomentRay");
+        };
+        let ldr_block = alt_moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::LDR)
+            .expect("falta el bloque de LDR en modo alternante");
+        // 10*log10(P_vh/P_hh) = 10*log10(0.09/1.0).
+        assert!(
+            (ldr_block.values[0] - (-10.458)).abs() < 0.1,
+            "LDR = {}, se esperaba ~-10.46 dB",
+            ldr_block.values[0]
+        );
+
+        let UpMessage::MomentRay {
+            moments: naive_moments,
+            ..
+        } = &naive_msg
+        else {
+            panic!("se esperaba MomentRay");
+        };
+        assert!(
+            !naive_moments
+                .iter()
+                .any(|m| m.field.kind == moment_kind::LDR),
+            "modo simultáneo no tiene canal cruzado con que estimar LDR"
+        );
     }
 
     #[test]

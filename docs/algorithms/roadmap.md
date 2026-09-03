@@ -288,15 +288,62 @@ el ajuste del helper de test de `crates/service::ray` que construye
 es reordenamiento de datos), cubierto con tests unitarios de
 `crates/ingest`. `cargo build`/`cargo test --workspace` en verde.
 
-**Lo que esto NO resuelve todavía**: nada en `crates/service::ray` consume
-todavía la subserie H/V — `split_by_tx_polarization` está expuesto pero sin
-llamador. Siguen en pie (c): (2) y (4) tal como estaban redactados
-(pulse-pair propio de modo alternante sobre las dos subseries de igual
-polarización, origen de `sigma_v_mps` para ese modo), ninguno de los dos se
-resuelve con el bit solo. Ninguno de (2)/(4) se resuelve agregando otro
-campo al contrato `DSP↔RCP` — son decisiones de `crates/ingest`/
-`crates/service` o constantes locales sin respaldo de oráculo, igual que
-otros huecos ya documentados en `crates/service::ray`.
+**(2) y (4) — cerrados: `crates/service::ray` ya consume la subserie H/V.**
+`split_by_tx_polarization` ya tiene llamador. UZ/V/SQI/SIG (y, cuando están
+activos, el estimador espectral alternativo y el filtro de clutter/RFI) ya
+no corren sobre `radial.channels[0]` entero en modo alternante: corren sobre
+`main_channel`, la subserie copolar H (paridad `TX_POL_V` = 0), con su PRT
+propio doblado (`own_prt_for_main` — se salta un pulso de cada dos, PRF
+efectiva a la mitad, tal como describe `docs/algorithms/
+polarimetria-covarianzas.md` §"Configuraciones cubiertas"). No hizo falta un
+estimador nuevo: a diferencia de staggered-PRT (dos retardos distintos, T1 y
+T2), la subserie copolar tiene espaciado UNIFORME (2×PRT nominal), así que
+`lamula_moments::pulse_pair_moments` se reutiliza tal cual con el PRT
+correcto — el "propio" que (2) pedía es la partición y el escalado del PRT,
+no una fórmula distinta. `polarimetric_moments_alternating` ya se llama con
+`hh` (= `main_channel`, reutilizado, no partido dos veces) y `vv` (partiendo
+`channels[1]`); `sigma_v_mps` sale de `spectrum_width_mps` del propio
+pulse-pair principal sobre esa misma celda — el origen que (4) dejaba
+pendiente. `ldr_db` también cableado: `vh` sale de partir `channels[1]` por
+la misma paridad, `antenna_isolation_db` ya venía del contrato (cerrado más
+abajo). LDR se censura a NaN si la celda ya está censurada por SNR o si
+`LdrEstimate::reliable` es falso — publicarlo sin fiabilidad es "engañoso",
+como dice la página del algoritmo. `nyquist_velocity` en la rama sin
+dealiasing por radial usa `own_prt_for_main`, así que la Nyquist ya sale
+reducida a la mitad en alternante sin rama aparte. Test de cableo (no de
+exactitud, ese ya está en `crates/polarimetry/tests/against_oracle.rs`) en
+`ray::tests::alternating_polarization_wiring_uses_split_subsequences_not_naive_simultaneous`:
+compara el ZDR/LDR obtenidos por el split correcto contra el cómputo
+ingenuo (simultáneo sobre la serie intercalada) y confirma que difieren —
+el error clásico que la página del algoritmo señala. `cargo build
+--workspace`/`cargo test --workspace` limpios.
+
+**Lo que esto NO resuelve todavía**: la combinación polarización alternante
++ `dealias_mode` `DUAL_PRF`/`STAGGERED_PRT` en el mismo radial no está
+contrastada contra ningún oráculo — ninguna de esas dos ramas de
+`nyquist_velocity`/`dual_prf_split`/`staggered_prt_split` usa
+`own_prt_for_main`, así que esa combinación (poco realista: alternar
+polarización Y PRF/PRT a la vez) queda sin comportamiento verificado, sólo
+sin pánico. Tampoco está contrastada la combinación alternante +
+`estimator = spectral` ni alternante + filtro de clutter/RFI — se enrutaron
+por el mismo `main_channel`/`own_prt_for_main` por consistencia (evitar la
+misma contaminación de (2) en cualquier otro consumidor de "el canal 0 tal
+cual"), pero ningún oráculo de este repositorio cubre esa interacción
+todavía. La corrección de ΦDP en modo alternante por el término de fase
+Doppler del retardo medio-PRT sigue pendiente, tal como ya señalaba el
+oráculo de `crates/polarimetry` antes de este cableo — no es un hueco nuevo.
+
+**Nota aparte, no cerrada por este cambio**: el enum `polarization_mode` del
+esquema (`contract/schema/dsp_rcp_v0_1.toml`) describe `alternating` como
+"H/V alternante **radial a radial**", pero `ray_flag::TX_POL_V` es un bit
+POR PULSO y todo este cableo (y el propio pedido a `lamula-drx` que lo
+originó, ver arriba) asume alternancia pulso a pulso — la misma que describe
+`docs/algorithms/polarimetria-covarianzas.md` ("H/V conmutados pulso a
+pulso"). Ese texto del esquema quedó desactualizado de una redacción anterior
+al bit `TX_POL_V`; no se corrige aquí porque tocar el esquema exige el mismo
+trámite de versión que `polarization_mode`/`antenna_isolation_db` (ver
+arriba) para un cambio que es sólo de documentación, no de formato — queda
+señalado para la próxima revisión del contrato.
 
 **`antenna_isolation_db` — cerrado: campo nuevo en `Config`, `DSP↔RCP` v0.2 →
 v1.0.** A diferencia de `polarization_mode`, no quedaba relleno suficiente en
