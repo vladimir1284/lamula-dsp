@@ -206,21 +206,52 @@ de `crate::main`): falta fase de burst por pulso en el wire, y falta un
 campo de hardware en el contrato con que decidir si aplicaría.
 
 **Modo de polarización de la instalación — cerrada: campo nuevo en el
-contrato.** El enum `moment_kind` promete LDR, y LDR sólo existe en modo
-alternante o con un canal cruzado dedicado. `crates/polarimetry` ya
-implementa `polarimetric_moments_alternating` y `ldr_db`, contrastados
-contra oráculo — el hueco no es de algoritmo, es de contrato: hoy sólo existe
-`n_rx_channels` (conteo), sin campo que diga si ese segundo canal es
-simultáneo (STAR) o alternante H/V, así que `crates/service` sólo cablea el
-caso simultáneo y LDR es inalcanzable en tiempo de ejecución. Se decide
-agregar un campo `polarization_mode` (simultáneo/alternante) al contrato
-`DSP↔RCP`. Pendiente antes de tocar `contract/schema/dsp_rcp_v0_1.toml`:
-acordar con el equipo RCP si esto es parche a v0.1 (el contrato está
-congelado) o entra en v0.2, y regenerar los bindings (`contract/generated/`).
-Esto reemplaza el marco anterior de la decisión ("le corresponde al equipo
-DRx fijar el `channel_mask`"): ese campo sigue sin existir en el esquema —
-la responsabilidad de DRx es el cableado físico de canales, la de este
-contrato es declarar el modo.
+contrato. Campo agregado, cableo a `crates/service::ray` sigue pendiente.**
+El enum `moment_kind` promete LDR, y LDR sólo existe en modo alternante o con
+un canal cruzado dedicado. `crates/polarimetry` ya implementa
+`polarimetric_moments_alternating` y `ldr_db`, contrastados contra oráculo —
+el hueco no era de algoritmo, era de contrato: sólo existía `n_rx_channels`
+(conteo), sin campo que dijera si ese segundo canal es simultáneo (STAR) o
+alternante H/V. Se decidió agregar un campo `polarization_mode`
+(simultáneo=0/alternante=1) al contrato `DSP↔RCP`, como patch de v0.1 a v0.2
+(`version_minor` 1→2): consume el `pad0: u32` que ya reservaba `config` sin
+crecer el mensaje (`polarization_mode: u8` + `pad0: u8` + `pad1: u16`, mismos
+4 bytes) — esto reemplaza el marco anterior de la decisión ("le corresponde
+al equipo DRx fijar el `channel_mask`"): la responsabilidad de DRx es el
+cableado físico de canales, la de este contrato es declarar el modo. Hecho:
+esquema, regeneración de `contract/generated/` (Rust/Python/TS) y los sitios
+manuales que codificaban `Config` byte a byte (`crates/rcp-link/src/wire.rs`
+y los tests de `crates/rcp-link`/`crates/service`). **Sin verificar**:
+`cargo build`/`cargo test` del workspace — este entorno no tiene `cargo`
+disponible; sólo se corrió la batería de contraste de codegen en Python
+(`contract/tests`, 71/71).
+
+**Lo que este campo NO resuelve todavía, y por qué es tarea aparte**: sólo
+declara el modo, no cablea `polarimetric_moments_alternating`/`ldr_db` en
+`crates/service::ray`. Hacerlo de verdad tropieza con huecos propios, no con
+falta del campo: (1) `AssembledRadial.channels[c][bin]` no documenta en
+ningún sitio la convención canal↔polarización en modo alternante — si
+`channels[0]` es "copolar" fijo por hardware (HH en pulsos de transmisión H,
+VV en pulsos de transmisión V) o si el mapeo es al revés, y qué paridad de
+pulso corresponde a cuál transmisión; ningún oráculo de
+`crates/ingest`/`tools/oracles/polarimetria_covarianzas.ipynb` cubre el
+ensamblado de radial, sólo el estimador ya con `h`/`v` separados. (2) El
+pulse-pair de UZ/V/SQI/SIG hoy corre sin condicionar sobre
+`radial.channels[0]` entero asumiendo una serie coherente a un único PRT —
+en modo alternante esa serie mezcla ecos de transmisión H y V pulso a pulso,
+y la autocovarianza a retardo 1 dejaría de medir sólo fase Doppler (se
+contaminaría con ZDR): hace falta un pulse-pair propio de modo alternante
+sobre las dos subsecuencias de igual polarización, mismo tipo de trabajo que
+`staggered_pulse_pair_velocities` le hizo falta a staggered-PRT, no reutilizar
+el de canal único sin más. (3) `ldr_db` pide `antenna_isolation_db`, que no
+tiene campo en `Config` — mismo tipo de hueco que `RHOHV_THRESHOLD_KDP`. (4)
+`polarimetric_moments_alternating` pide `sigma_v_mps` (ancho espectral) ya
+estimado por celda; con el pulse-pair de canal único eso existe
+(`PulsePairEstimate::spectrum_width_mps`), pero con el pulse-pair propio de
+(2) todavía sin escribir no hay de dónde tomarlo. Ninguno de los cuatro se
+resuelve agregando otro campo al contrato — son decisiones de
+`crates/ingest`/`crates/service` o constantes locales sin respaldo de
+oráculo, igual que otros huecos ya documentados en `crates/service::ray`.
 
 **Qué significa exactamente CZ — cerrada: se expande a incluir corrección de
 atenuación. Implementada.** Por herencia de Vesta/Sigmet, CZ era hasta ahora

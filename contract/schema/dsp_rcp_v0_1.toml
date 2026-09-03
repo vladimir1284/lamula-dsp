@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 0
-version_minor = 1
+version_minor = 2
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -320,7 +320,9 @@ fields = [
   { name = "zdr_offset_db", type = "f32", doc = "Corrección de sesgo de ZDR, dB." },
   { name = "phidp_offset_deg", type = "f32", doc = "Fase diferencial del sistema a restar, grados." },
   { name = "wavelength_m", type = "f32", doc = "Longitud de onda, metros. Escala la velocidad." },
-  { name = "pad0", type = "u32", doc = "Relleno explícito; vale 0." },
+  { name = "polarization_mode", type = "u8", doc = "Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único." },
+  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+  { name = "pad1", type = "u16", doc = "Relleno explícito; vale 0." },
 ]
 
 [[message]]
@@ -463,6 +465,17 @@ values = [
   { name = "none", value = 0, doc = "PRF único; Nyquist sin extender." },
   { name = "dual_prf", value = 1, doc = "PRF alternante por radial." },
   { name = "staggered_prt", value = 2, doc = "Periodo escalonado dentro del radial." },
+]
+
+[[enum]]
+name = "polarization_mode"
+type = "u8"
+doc = """Modo del segundo canal de recepción, cuando `n_rx_channels > 1`
+(`docs/algorithms/roadmap.md` §"Decisiones cerradas"). Sin efecto con canal
+único: no hay segundo canal con que elegir modo."""
+values = [
+  { name = "simultaneous", value = 0, doc = "STAR: H y V transmitidos y recibidos a la vez. Da ZDR/ΦDP/KDP/ρHV; no LDR." },
+  { name = "alternating", value = 1, doc = "H/V alternante radial a radial. Da LDR; PRF efectiva por canal a la mitad." },
 ]
 
 [[enum]]

@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v0.1 — lado DSP.
+// Contrato DSP↔RCP v0.2 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 0;
-pub const VERSION_MINOR: u8 = 1;
+pub const VERSION_MINOR: u8 = 2;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -393,8 +393,12 @@ pub struct Config {
     pub phidp_offset_deg: f32,
     /// Longitud de onda, metros. Escala la velocidad.
     pub wavelength_m: f32,
+    /// Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único.
+    pub polarization_mode: u8,
     /// Relleno explícito; vale 0.
-    pub pad0: u32,
+    pub pad0: u8,
+    /// Relleno explícito; vale 0.
+    pub pad1: u16,
 }
 pub const CONFIG_SIZE: usize = 80;
 
@@ -569,6 +573,16 @@ pub mod dealias_mode {
     pub const DUAL_PRF: u8 = 1;
     /// Periodo escalonado dentro del radial.
     pub const STAGGERED_PRT: u8 = 2;
+}
+
+/// Modo del segundo canal de recepción, cuando `n_rx_channels > 1`
+/// (`docs/algorithms/roadmap.md` §"Decisiones cerradas"). Sin efecto con canal
+/// único: no hay segundo canal con que elegir modo.
+pub mod polarization_mode {
+    /// STAR: H y V transmitidos y recibidos a la vez. Da ZDR/ΦDP/KDP/ρHV; no LDR.
+    pub const SIMULTANEOUS: u8 = 0;
+    /// H/V alternante radial a radial. Da LDR; PRF efectiva por canal a la mitad.
+    pub const ALTERNATING: u8 = 1;
 }
 
 /// Estimadores de momentos.

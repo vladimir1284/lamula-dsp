@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v0.1 — lado RCP y
+Contrato DSP↔RCP v0.2 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 0
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 
 @dataclass
 class Header:
@@ -284,9 +284,9 @@ class Capabilities:
 class Config:
     """Configuración completa. Se aplica de forma atómica: o entra entera o se"""
 
-    FORMAT = "<IIHHBBBBBBBBffffffffffffffI"
+    FORMAT = "<IIHHBBBBBBBBffffffffffffffBBH"
     SIZE = 80
-    FIELDS = ("seq", "moment_mask", "n_pulses", "n_gates", "clutter_filter", "dealias_mode", "sweep_mode", "estimator", "rfi_filter", "range_dealias", "prf_ratio_num", "prf_ratio_den", "start_range_m", "gate_spacing_m", "prf_hz", "sqi_threshold", "sig_threshold", "ccor_threshold", "log_threshold", "clutter_width_ms", "radar_constant_db", "noise_floor_dbm", "receiver_gain_db", "zdr_offset_db", "phidp_offset_deg", "wavelength_m", "pad0",)
+    FIELDS = ("seq", "moment_mask", "n_pulses", "n_gates", "clutter_filter", "dealias_mode", "sweep_mode", "estimator", "rfi_filter", "range_dealias", "prf_ratio_num", "prf_ratio_den", "start_range_m", "gate_spacing_m", "prf_hz", "sqi_threshold", "sig_threshold", "ccor_threshold", "log_threshold", "clutter_width_ms", "radar_constant_db", "noise_floor_dbm", "receiver_gain_db", "zdr_offset_db", "phidp_offset_deg", "wavelength_m", "polarization_mode", "pad0", "pad1",)
 
     seq: int = 0
     moment_mask: int = 0
@@ -314,7 +314,9 @@ class Config:
     zdr_offset_db: float = 0.0
     phidp_offset_deg: float = 0.0
     wavelength_m: float = 0.0
+    polarization_mode: int = 0
     pad0: int = 0
+    pad1: int = 0
 
     def pack(self) -> bytes:
         return struct.pack(self.FORMAT, *(getattr(self, name) for name in self.FIELDS))
@@ -449,6 +451,12 @@ class DealiasMode:
     NONE = 0
     DUAL_PRF = 1
     STAGGERED_PRT = 2
+
+class PolarizationMode:
+    """Modo del segundo canal de recepción, cuando `n_rx_channels > 1`"""
+
+    SIMULTANEOUS = 0
+    ALTERNATING = 1
 
 class Estimator:
     """Estimadores de momentos."""

@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v0.1 — lado MMI.
+// Contrato DSP↔RCP v0.2 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 0;
-export const VERSION_MINOR = 1;
+export const VERSION_MINOR = 2;
 
 const LE = true;
 
@@ -827,8 +827,12 @@ export interface Config {
   phidpOffsetDeg: number;
   /** Longitud de onda, metros. Escala la velocidad. */
   wavelengthM: number;
+  /** Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único. */
+  polarizationMode: number;
   /** Relleno explícito; vale 0. */
   pad0: number;
+  /** Relleno explícito; vale 0. */
+  pad1: number;
 }
 
 export const CONFIG_SIZE = 80;
@@ -860,7 +864,9 @@ export const CONFIG_OFFSETS = {
   zdrOffsetDb: 64,
   phidpOffsetDeg: 68,
   wavelengthM: 72,
-  pad0: 76,
+  polarizationMode: 76,
+  pad0: 77,
+  pad1: 78,
 } as const;
 
 export function decodeConfig(view: DataView, base = 0): Config {
@@ -891,7 +897,9 @@ export function decodeConfig(view: DataView, base = 0): Config {
     zdrOffsetDb: view.getFloat32(base + 64, LE),
     phidpOffsetDeg: view.getFloat32(base + 68, LE),
     wavelengthM: view.getFloat32(base + 72, LE),
-    pad0: view.getUint32(base + 76, LE),
+    polarizationMode: view.getUint8(base + 76),
+    pad0: view.getUint8(base + 77),
+    pad1: view.getUint16(base + 78, LE),
   };
 }
 
@@ -923,7 +931,9 @@ export function encodeConfig(value: Config, view?: DataView, base = 0): DataView
   dv.setFloat32(base + 64, value.zdrOffsetDb, LE);
   dv.setFloat32(base + 68, value.phidpOffsetDeg, LE);
   dv.setFloat32(base + 72, value.wavelengthM, LE);
-  dv.setUint32(base + 76, value.pad0, LE);
+  dv.setUint8(base + 76, value.polarizationMode);
+  dv.setUint8(base + 77, value.pad0);
+  dv.setUint16(base + 78, value.pad1, LE);
   return dv;
 }
 
@@ -1160,6 +1170,18 @@ export const DealiasMode = {
   DUAL_PRF: 1,
   /** Periodo escalonado dentro del radial. */
   STAGGERED_PRT: 2,
+} as const;
+
+/**
+ * Modo del segundo canal de recepción, cuando `n_rx_channels > 1`
+ * (`docs/algorithms/roadmap.md` §"Decisiones cerradas"). Sin efecto con canal
+ * único: no hay segundo canal con que elegir modo.
+ */
+export const PolarizationMode = {
+  /** STAR: H y V transmitidos y recibidos a la vez. Da ZDR/ΦDP/KDP/ρHV; no LDR. */
+  SIMULTANEOUS: 0,
+  /** H/V alternante radial a radial. Da LDR; PRF efectiva por canal a la mitad. */
+  ALTERNATING: 1,
 } as const;
 
 /**

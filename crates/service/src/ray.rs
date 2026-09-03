@@ -1244,7 +1244,9 @@ mod tests {
             zdr_offset_db: 0.0,
             phidp_offset_deg: 0.0,
             wavelength_m: 0.10,
+            polarization_mode: 0,
             pad0: 0,
+            pad1: 0,
         }
     }
 

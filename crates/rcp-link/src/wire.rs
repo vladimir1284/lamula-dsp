@@ -385,7 +385,9 @@ fn decode_config_body(body: &[u8]) -> Result<Config, RcpLinkError> {
         zdr_offset_db: f32::from_le_bytes(body[64..68].try_into().unwrap()),
         phidp_offset_deg: f32::from_le_bytes(body[68..72].try_into().unwrap()),
         wavelength_m: f32::from_le_bytes(body[72..76].try_into().unwrap()),
-        pad0: u32::from_le_bytes(body[76..80].try_into().unwrap()),
+        polarization_mode: body[76],
+        pad0: body[77],
+        pad1: u16::from_le_bytes(body[78..80].try_into().unwrap()),
     })
 }
 
