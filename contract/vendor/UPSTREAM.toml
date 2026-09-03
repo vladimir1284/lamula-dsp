@@ -14,7 +14,7 @@
 [upstream]
 project = "lamula-drx"
 repo_path = "../lamula-drx"
-commit = "31cec5058aaea41004a555a31b0390c0817f208c"
+commit = "61edc824882dfc7b1cc8919d41f25bffbf6509d2"
 commit_date = "2026-09-03"
 schema = "contract/schema/drx_dsp_v0_1.toml"
 generator = "tools/gen_contract.py"
@@ -22,7 +22,7 @@ generator = "tools/gen_contract.py"
 [contract]
 name = "drx_dsp"
 version_major = 0
-version_minor = 2
+version_minor = 3
 magic = 0x4C4D4452
 endianness = "little"
 
@@ -31,13 +31,13 @@ endianness = "little"
 [[file]]
 path = "drx_dsp_v0_1.rs"
 source = "contract/generated/drx_dsp_v0_1.rs"
-sha256 = "fcf294c40e92b6d50062f168e22027246dfa4640ac2f274c4deded2813afd94b"
+sha256 = "1f8e01521a7e12b771f1e4d44b04376a2801b34942664811ffe7c530dc36b9c1"
 role = "Implementación del lado DSP. Se compila dentro del crate de ingesta."
 
 [[file]]
 path = "drx_dsp_v0_1.py"
 source = "contract/generated/drx_dsp_v0_1.py"
-sha256 = "a25e1af1328d0e310f817e43c0a6ad9e4820ecc03734d7a28ab8046dc794c3e9"
+sha256 = "44cb21b1f41627b10442fad819133e2c2d9141a15d18740693bd7b00e61dd2fe"
 role = "Referencia de empaquetado para el banco de pruebas y el simulador de DRx."
 
 # El esquema TOML y la cabecera C no se vendorizan: el DSP no genera código ni
@@ -45,8 +45,8 @@ role = "Referencia de empaquetado para el banco de pruebas y el simulador de DRx
 # el origen cambió sin que nadie re-vendorizara.
 [[watch]]
 source = "contract/schema/drx_dsp_v0_1.toml"
-sha256 = "eb967f75e38546e5d515e4cac37f13973dc2bba3b83e0ecc9a3999700416ae17"
+sha256 = "9a70f291686a09ed9a08105a236f7dd01160a3745104ebaad9411f8ad625da5e"
 
 [[watch]]
 source = "contract/generated/drx_dsp_v0_1.h"
-sha256 = "373903da04f7018de3cd1034df9a8b7600d19f65fd864a70314a72c731a0b22e"
+sha256 = "31d6dae9be81818b69c81fc1cb3510584dcb81f951bad188113b8b9886efdcdf"

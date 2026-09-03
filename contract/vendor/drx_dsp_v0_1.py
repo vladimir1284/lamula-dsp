@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/drx_dsp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DRx↔DSP v0.2 — referencia
+Contrato DRx↔DSP v0.3 — referencia
 de los tests de contrato. Es la tercera implementación generada de la misma
 fuente: si esta y la de C no producen los mismos bytes, el codegen está mal.
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4452
 VERSION_MAJOR = 0
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 
 @dataclass
 class Header:
@@ -184,6 +184,16 @@ class Error:
     CHANNEL_MASK_INVALID = 7
     SCAN_MODE_INVALID = 8
     NOT_CONFIGURED = 9
+
+class Channel:
+    """Bit por canal físico presente en channel_mask. El orden de channels[] en el payload de ray sigue el orden ascendente de los bits puestos en channel_mask; cada canal aporta los mismos `bins` que el resto del rayo."""
+
+    RX_0 = 1
+    RX_1 = 2
+    RX_2 = 4
+    RX_3 = 8
+    TX_BURST_0 = 16
+    TX_BURST_1 = 32
 
 class RayFlag:
     """Banderas por rayo. Un rayo con problemas se MARCA, no se descarta."""
