@@ -152,8 +152,10 @@
 //! aplicaría — ver "Decisiones cerradas" en `docs/algorithms/roadmap.md`.
 
 use lamula_attenuation::zphi_correct_dbz;
+use lamula_burst::{burst_phase_estimate, correct_phase};
 use lamula_calibration::power_to_dbz;
 use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
+use lamula_contract::drx_dsp::channel;
 use lamula_contract::dsp_rcp::{
     clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind,
     polarization_mode, ray_flag, Config, MomentField, MomentRay,
@@ -537,6 +539,57 @@ fn clutter_filtered_power(
     }
 }
 
+/// Corrección de fase coherent-on-receive (`docs/algorithms/burst-fase-afc.md`
+/// §"Corrección de fase"): mide la fase inicial de cada pulso en el canal de
+/// burst (`lamula_burst::burst_phase_estimate` sobre la ventana de
+/// `channel::TX_BURST_0`, largo `config.burst_window_bins` — ver
+/// `AssembledRadial::burst_window`) y la resta de todas las muestras de eco
+/// de ese mismo pulso en todo canal que no sea el propio canal de burst.
+/// Sin esto, en una instalación de magnetrón la fase entre pulsos
+/// consecutivos es ruido uniforme y ningún estimador Doppler aguas abajo
+/// significa nada (prerrequisito duro, fase 1 del plan para magnetrón).
+///
+/// Sólo consume `channel::TX_BURST_0`: si el hardware trae también
+/// `TX_BURST_1`, este cableo inicial no lo usa — una sola referencia de fase
+/// alcanza para coherent-on-receive, un segundo canal de burst es
+/// redundancia de hardware, no un algoritmo distinto. Con transmisor
+/// coherente la corrección compensa un desfase de sistema constante en vez
+/// de ruido pulso a pulso; el código no distingue los dos casos, sólo mide
+/// lo que hay.
+///
+/// Devuelve `None` (sin tocar nada) si `config.burst_window_bins == 0` o si
+/// este radial no trae canal de burst — instalación sin ese cableado, o
+/// transmisor coherente sin monitor de burst.
+///
+/// **No cablea el lazo de AFC** (`lamula_burst::AfcLoop`): eso exigiría
+/// enviar el mensaje `Afc` (`nco_phase_inc`) de vuelta al DRx, y
+/// `crates/ingest` sólo tiene camino de lectura sobre esa conexión hoy, no
+/// de escritura — trabajo aparte, no de este cableo.
+fn burst_phase_correct(radial: &AssembledRadial, config: &Config) -> Option<AssembledRadial> {
+    if config.burst_window_bins == 0 {
+        return None;
+    }
+    let n_pulses = radial.ray_flags.len();
+    let bursts: Vec<Vec<Complex64>> = (0..n_pulses)
+        .map(|p| radial.burst_window(channel::TX_BURST_0, p, config.burst_window_bins as usize))
+        .collect::<Option<Vec<_>>>()?;
+    let phases: Vec<f64> = bursts.iter().map(|w| burst_phase_estimate(w)).collect();
+
+    let burst_idx = radial.channel_index(channel::TX_BURST_0)?;
+    let mut corrected = radial.clone();
+    for (c, ch) in corrected.channels.iter_mut().enumerate() {
+        if c == burst_idx {
+            continue;
+        }
+        for bin in ch.iter_mut() {
+            for (p, sample) in bin.iter_mut().enumerate() {
+                *sample = correct_phase(*sample, phases[p]);
+            }
+        }
+    }
+    Some(corrected)
+}
+
 pub fn build_moment_ray(
     radial: &AssembledRadial,
     config: &Config,
@@ -546,6 +599,14 @@ pub fn build_moment_ray(
     ssi_zero_offset_deg: f64,
     previous_prf: Option<&PreviousPrf>,
 ) -> (UpMessage, PreviousPrf) {
+    // Coherent-on-receive antes que cualquier otra cosa: todo lo que sigue
+    // (pulse-pair, polarimetría, clutter, RFI, dealiasing) asume una serie ya
+    // en fase. `burst_corrected` sólo existe para prestarle vida a la
+    // corregida cuando aplica; si no aplica, `radial` sigue apuntando al
+    // parámetro original sin copiar nada.
+    let burst_corrected = burst_phase_correct(radial, config);
+    let radial: &AssembledRadial = burst_corrected.as_ref().unwrap_or(radial);
+
     let wavelength_m = config.wavelength_m as f64;
     let mean_prt_s = 1.0 / config.prf_hz as f64;
 
@@ -1671,6 +1732,108 @@ mod tests {
                 .iter()
                 .any(|m| m.field.kind == moment_kind::LDR),
             "modo simultáneo no tiene canal cruzado con que estimar LDR"
+        );
+    }
+
+    #[test]
+    fn burst_phase_correction_recovers_velocity_from_magnetron_pulse_to_pulse_phase_noise() {
+        // Simula un magnetrón: cada pulso sale con una fase inicial
+        // aleatoria (`phi_true[p]`), la misma en el eco (canal 0) y en la
+        // muestra de burst (canal 1, `TX_BURST_0`) porque las dos vienen del
+        // mismo pulso transmitido. Sin corrección, esa fase aleatoria pulso
+        // a pulso destruye la autocovarianza de retardo 1 y `V` no significa
+        // nada; `burst_phase_correct` (cableado al inicio de
+        // `build_moment_ray`) tiene que restaurarla.
+        const V_TRUE: f64 = 15.0;
+        let mut rng = StdRng::seed_from_u64(20260903);
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: V_TRUE,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.0e-3,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let coherent_h = generate_cell(&cell, &mut rng);
+
+        let phi_true: Vec<f64> = (0..coherent_h.len())
+            .map(|i| {
+                // Determinista, sin RNG: cubre [-pi,pi) sin repetir un
+                // patrón corto que coincidiera por casualidad con el PRT.
+                let frac = ((i as f64) * 0.6180339887) % 1.0; // razón áurea
+                (frac - 0.5) * 2.0 * std::f64::consts::PI
+            })
+            .collect();
+        let magnetron_h: Vec<Complex64> = coherent_h
+            .iter()
+            .zip(&phi_true)
+            .map(|(&s, &phi)| s * Complex64::from_polar(1.0, phi))
+            .collect();
+        // Ventana de burst de 1 bin: la fase de ese único bin ES phi_true,
+        // sin promediar nada (amplitud alta, sin ruido -- el burst real
+        // tiene su propio SNR, pero eso ya lo contrasta
+        // `crates/burst/tests/against_oracle.rs`; acá sólo importa el cableo).
+        let burst_ch: Vec<Complex64> = phi_true
+            .iter()
+            .map(|&phi| Complex64::from_polar(10.0, phi))
+            .collect();
+
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: channel::RX_0 | channel::TX_BURST_0,
+            channels: vec![vec![magnetron_h], vec![burst_ch]],
+            ray_flags: vec![0; coherent_h.len()],
+            dropped_pulses: 0,
+        };
+
+        let base_config = Config {
+            moment_mask: 1 << moment_kind::V,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        let uncorrected_config = Config {
+            burst_window_bins: 0,
+            ..base_config
+        };
+        let corrected_config = Config {
+            burst_window_bins: 1,
+            ..base_config
+        };
+
+        fn v_of(msg: &UpMessage) -> f64 {
+            let UpMessage::MomentRay { moments, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            moments
+                .iter()
+                .find(|m| m.field.kind == moment_kind::V)
+                .expect("falta el bloque de V")
+                .values[0] as f64
+        }
+
+        let (uncorrected_msg, _) =
+            build_moment_ray(&radial, &uncorrected_config, 1, false, 1_000_000, 0.0, None);
+        let (corrected_msg, _) =
+            build_moment_ray(&radial, &corrected_config, 1, false, 1_000_000, 0.0, None);
+
+        let uncorrected_v = v_of(&uncorrected_msg);
+        let corrected_v = v_of(&corrected_msg);
+
+        assert!(
+            (uncorrected_v - V_TRUE).abs() > 5.0,
+            "sin corregir, V ({uncorrected_v}) no debería acercarse a v_true={V_TRUE}: la fase de magnetrón tiene que arruinar la autocovarianza"
+        );
+        assert!(
+            (corrected_v - V_TRUE).abs() < 1.0,
+            "corregido, V ({corrected_v}) debería acercarse a v_true={V_TRUE}"
         );
     }
 

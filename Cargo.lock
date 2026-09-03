@@ -83,6 +83,7 @@ name = "lamula-dsp-service"
 version = "0.1.0"
 dependencies = [
  "lamula-attenuation",
+ "lamula-burst",
  "lamula-calibration",
  "lamula-clutter",
  "lamula-contract",

@@ -35,10 +35,21 @@
 //!   doc-comment); NO usa `classify_trip` de `lamula-range-dealias`, que
 //!   modela un blanco puntual con detección de picos que este pipeline de
 //!   eco distribuido no tiene. La recuperación por fase aleatoria
-//!   (`recover_trip1`, sólo instalaciones de magnetrón) sigue sin conectar:
-//!   necesita fase de burst por pulso, que el wire `DRx↔DSP` no transporta
-//!   en ningún campo, y el contrato tampoco tiene un campo de hardware con
-//!   que decidir si aplicaría.
+//!   (`recover_trip1`, sólo instalaciones de magnetrón) sigue sin conectar
+//!   aquí: ya existe fase de burst por pulso en el wire (`channel::
+//!   TX_BURST_0`, `contract/schema/drx_dsp_v0_1.toml` v0.3) y
+//!   `crate::ray::burst_phase_correct` la usa para coherent-on-receive, pero
+//!   nadie llama a `recover_trip1` con ella todavía — trabajo aparte, no
+//!   bloqueado por contrato como antes.
+//!   Coherent-on-receive (`crate::ray::burst_phase_correct`) sí está
+//!   conectado: corrige la fase de todo canal que no sea `TX_BURST_0` con
+//!   `lamula_burst::{burst_phase_estimate, correct_phase}` cuando
+//!   `config.burst_window_bins > 0` y el radial trae ese canal — prerrequisito
+//!   duro de cualquier estimador Doppler en magnetrón
+//!   (`docs/algorithms/burst-fase-afc.md`). El lazo de AFC
+//!   (`lamula_burst::AfcLoop`) NO está conectado: exigiría mandar el mensaje
+//!   `Afc` (`nco_phase_inc`) de vuelta al DRx, y `lamula_ingest` sólo tiene
+//!   camino de lectura sobre esa conexión hoy, no de escritura.
 //! - Censura por `sig_threshold`/`sqi_threshold`/`log_threshold`, y por
 //!   separado la de ZDR/ρHV/ΦDP/KDP: ver el doc-comment de `crate::ray`.
 //!   `ccor_threshold` no se aplica (no hay CCOR que evaluar). El desdoblado

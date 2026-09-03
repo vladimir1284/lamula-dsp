@@ -82,6 +82,42 @@ impl AssembledRadial {
         }
         (h, v)
     }
+
+    /// Bits de `channel_mask` puestos, en el mismo orden ascendente que
+    /// `channels[]` usa para indexarlos (`drx_dsp::channel`, contrato v0.3):
+    /// `channel_bits()[c]` es el bit físico de `channels[c]`.
+    fn channel_bits(&self) -> Vec<u8> {
+        (0..8u8)
+            .map(|i| 1u8 << i)
+            .filter(|bit| self.channel_mask & bit != 0)
+            .collect()
+    }
+
+    /// Índice en `channels[]` del canal marcado por `bit` (una constante de
+    /// `drx_dsp::channel`) en `channel_mask`, o `None` si ese canal no está
+    /// presente en este radial.
+    pub fn channel_index(&self, bit: u8) -> Option<usize> {
+        self.channel_bits().iter().position(|&b| b == bit)
+    }
+
+    /// Ventana de burst del pulso `pulse_idx` en el canal marcado por `bit`
+    /// (típicamente `drx_dsp::channel::TX_BURST_0`/`TX_BURST_1`): los
+    /// primeros `window_bins` bins de ese canal en ese pulso — la longitud
+    /// que declara `Config::burst_window_bins` del contrato `DSP↔RCP`, el
+    /// resto del canal es ruido/silencio (`drx_dsp::channel`, doc del enum).
+    /// `None` si el canal no está presente, si `window_bins` es 0, o si el
+    /// radial no tiene bins suficientes.
+    pub fn burst_window(&self, bit: u8, pulse_idx: usize, window_bins: usize) -> Option<Vec<Complex64>> {
+        if window_bins == 0 {
+            return None;
+        }
+        let c = self.channel_index(bit)?;
+        let bins = self.channels[c].len().min(window_bins);
+        if bins == 0 {
+            return None;
+        }
+        Some((0..bins).map(|bin| self.channels[c][bin][pulse_idx]).collect())
+    }
 }
 
 /// Junta tramas de un pulso en radiales de `n_pulses` pulsos. Un assembler
@@ -309,5 +345,85 @@ mod tests {
         let (h, v) = radial.split_by_tx_polarization(&radial.channels[0][0]);
         assert_eq!(h, radial.channels[0][0]);
         assert!(v.is_empty());
+    }
+
+    /// Trama con `n_channels` canales de `n_bins` bins cada uno; la muestra
+    /// del canal `c`, bin `b` vale `value + 100.0*c as f64 + 10.0*b as f64`,
+    /// para poder identificar en los asserts de qué canal/bin salió.
+    fn multi_channel_frame(seq: u32, channel_mask: u8, n_channels: usize, n_bins: usize, value: f64) -> RawPulseFrame {
+        let channels = (0..n_channels)
+            .map(|c| {
+                (0..n_bins)
+                    .map(|b| Complex64::new(value + 100.0 * c as f64 + 10.0 * b as f64, 0.0))
+                    .collect()
+            })
+            .collect();
+        RawPulseFrame {
+            seq,
+            timestamp_ns: seq as u64,
+            trigger_count: seq,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 4,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask,
+            ray_flags: 0,
+            channels,
+        }
+    }
+
+    #[test]
+    fn channel_index_maps_ascending_channel_mask_bits_to_channels_positions() {
+        // RX_0 (bit 1) + TX_BURST_0 (bit 16): channels[0] es RX_0,
+        // channels[1] es TX_BURST_0 — el orden es el de los bits puestos,
+        // no el valor del bit.
+        let mask = 0b0001_0001;
+        let mut assembler = RadialAssembler::new(2);
+        assembler.feed(multi_channel_frame(0, mask, 2, 1, 1.0)).unwrap();
+        let radial = assembler
+            .feed(multi_channel_frame(1, mask, 2, 1, 2.0))
+            .unwrap()
+            .expect("2 pulsos juntados");
+
+        assert_eq!(radial.channel_index(1), Some(0)); // RX_0
+        assert_eq!(radial.channel_index(16), Some(1)); // TX_BURST_0
+        assert_eq!(radial.channel_index(2), None); // RX_1, ausente
+    }
+
+    #[test]
+    fn burst_window_reads_first_window_bins_of_the_burst_channel_for_one_pulse() {
+        // RX_0 (bit 1) + TX_BURST_0 (bit 16), 3 bins: sólo los primeros 2
+        // bins del canal de burst son ventana real (`window_bins = 2`).
+        let mask = 0b0001_0001;
+        let mut assembler = RadialAssembler::new(2);
+        assembler.feed(multi_channel_frame(0, mask, 2, 3, 1.0)).unwrap();
+        let radial = assembler
+            .feed(multi_channel_frame(1, mask, 2, 3, 2.0))
+            .unwrap()
+            .expect("2 pulsos juntados");
+
+        // Canal 1 (TX_BURST_0), pulso 1 (value base 2.0): bin0=102.0,
+        // bin1=112.0, bin2=122.0 — la ventana de 2 bins corta antes de bin2.
+        let window = radial.burst_window(16, 1, 2).expect("canal de burst presente");
+        assert_eq!(window, vec![Complex64::new(102.0, 0.0), Complex64::new(112.0, 0.0)]);
+    }
+
+    #[test]
+    fn burst_window_is_none_without_burst_channel_or_zero_window() {
+        let mut assembler = RadialAssembler::new(2);
+        assembler.feed(frame(0, 1.0)).unwrap();
+        let radial = assembler
+            .feed(frame(1, 2.0))
+            .unwrap()
+            .expect("2 pulsos juntados");
+
+        assert_eq!(radial.burst_window(16, 0, 2), None, "no hay canal de burst");
+        assert_eq!(
+            radial.burst_window(1, 0, 0),
+            None,
+            "window_bins = 0 no es una ventana"
+        );
     }
 }
