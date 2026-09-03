@@ -386,6 +386,66 @@ coeficientes `β`/`a_coef` de la fórmula quedan fijos como constantes locales
 en `crates/service::ray` (banda C por defecto), mismo tipo de hueco sin
 campo propio en el contrato que `polarization_mode` — ver arriba.
 
+**Burst/AFC (`crates/burst`) → `crates/service::ray` — cerrado el hueco de
+contrato, cableada la corrección de fase; el lazo de AFC sigue sin cablear.**
+`crates/burst` (medida de fase/frecuencia del burst, corrección
+coherent-on-receive, lazo de AFC) estaba implementado y contrastado contra
+oráculo desde que se agregó el crate, pero no se podía cablear: `channel_mask`
+no tenía tabla de bits (a diferencia de `ray_flag`/`bite_flag`), así que nada
+decía qué canal, de los que trae `channels[c][bin]`, es un canal de burst —
+mismo tipo de hueco de contrato ya cerrado para `ray_flag::tx_pol_v`.
+Verificado contra el proyecto DRx (`rtl/ssa/drx_ssa_pkg.sv`: `N_RX_CH=4`,
+`N_TX_BURST_CH=2`) que el hardware sí reserva los dos canales de burst, pero
+ningún artefacto (contrato, firmware, RTL) asignaba bit/índice concreto a
+cada uno.
+
+Se pidió el campo al proyecto DRx: enum `channel` sobre `channel_mask`
+(`rx_0..rx_3` bits 1/2/4/8, `tx_burst_0`/`tx_burst_1` bits 16/32), `DRx↔DSP`
+v0.2 → v0.3, aditivo (commit `61edc824882dfc7b1cc8919d41f25bffbf6509d2` en
+`lamula-drx`, revendorizado acá). El orden de `channels[]` (ascendente por
+bit puesto) y que un canal de burst trae los mismos `bins` que el resto del
+rayo (energía sólo durante la ventana del pulso, silencio el resto) quedaron
+documentados en el propio enum — inferencia razonable, no confirmada contra
+RTL/firmware más allá del conteo de canales, señalada como tal en la
+solicitud.
+
+Segundo hueco encontrado al cablear: ni siquiera con el canal identificado
+había forma de saber CUÁNTOS bins iniciales de ese canal son ventana de
+burst real — depende de `pulse_width_idx`/decimación, específico de la
+instalación. Se decidió resolverlo del lado `DSP↔RCP` en vez de pedir otro
+campo a DRx (es config de instalación, mismo tipo que `zdr_offset_db`/
+`antenna_isolation_db`): campo nuevo `burst_window_bins` (`u16`) en `Config`,
+consumiendo el `pad1` que quedaba libre tras `polarization_mode` — aditivo,
+`CONFIG_SIZE` se mantiene en 84 B, `version_minor` v1.0 → v1.1. `0` significa
+"sin canal de burst" (transmisor coherente sin monitor, o instalación sin
+ese cableado).
+
+Con los dos campos ya declarados, `crates/service::ray::burst_phase_correct`
+mide la fase de `channel::TX_BURST_0` por pulso
+(`lamula_burst::burst_phase_estimate` sobre `AssembledRadial::burst_window`,
+nuevo helper mecánico en `crates/ingest`, mismo tipo de trabajo que
+`split_by_tx_polarization` — sin fórmula propia, cubierto con test unitario
+en vez de contraste de oráculo) y corrige con
+`lamula_burst::correct_phase` todo canal que no sea el propio canal de burst,
+antes de que corra cualquier otra cosa (pulse-pair, polarimetría, clutter,
+RFI, dealiasing) — cableado por un `radial` sombreado al principio de
+`build_moment_ray`, sin tocar la lógica aguas abajo. Sólo consume
+`TX_BURST_0`; `TX_BURST_1`, si está presente, queda sin usar en este cableo
+inicial (redundancia de hardware, no un algoritmo distinto). Test de cableo
+(`ray::tests::burst_phase_correction_recovers_velocity_from_magnetron_pulse_to_pulse_phase_noise`):
+radial sintético con fase aleatoria pulso a pulso inyectada por igual en eco
+y burst (como saldría del mismo pulso transmitido) — sin corregir, V no se
+acerca a v_true; corregido, sí. `cargo test --workspace` limpio.
+
+**Lo que esto NO resuelve**: el lazo de AFC (`lamula_burst::AfcLoop`) sigue
+sin cablear — exige mandar el mensaje `Afc` (`nco_phase_inc`) de vuelta al
+DRx, y `crates/ingest` sólo tiene camino de lectura sobre esa conexión hoy,
+no de escritura; es trabajo aparte, de infraestructura de transporte, no de
+algoritmo. Tampoco se cableó `recover_trip1` de
+[dealiasing de rango](dealiasing-de-rango.md) con esta misma fase de burst,
+aunque el bloqueo de contrato que lo impedía ya no existe — sigue pendiente
+por no haberse hecho, no por falta de dato.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.
