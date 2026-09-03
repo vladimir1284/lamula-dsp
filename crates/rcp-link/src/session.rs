@@ -161,7 +161,7 @@ mod tests {
             wavelength_m: 0.1,
             polarization_mode: 0,
             pad0: 0,
-            pad1: 0,
+            burst_window_bins: 0,
         }
     }
 

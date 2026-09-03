@@ -131,7 +131,7 @@ fn drx_afc() {
 fn dsp_identidad() {
     assert_eq!(dsp_rcp::MAGIC, 0x4C4D_4453, "magic no es \"LMDS\"");
     assert_eq!(dsp_rcp::VERSION_MAJOR, 1);
-    assert_eq!(dsp_rcp::VERSION_MINOR, 0);
+    assert_eq!(dsp_rcp::VERSION_MINOR, 1);
 }
 
 /// Los dos contratos comparten forma y tamaño de cabecera a propósito, para que
@@ -275,7 +275,7 @@ fn dsp_config() {
         clutter_width_ms: 4, radar_constant_db: 4, noise_floor_dbm: 4,
         receiver_gain_db: 4, zdr_offset_db: 4, phidp_offset_deg: 4,
         antenna_isolation_db: 4, wavelength_m: 4, polarization_mode: 1,
-        pad0: 1, pad1: 2,
+        pad0: 1, burst_window_bins: 2,
     );
     assert_eq!(dsp_rcp::CONFIG_SIZE, 84);
 }

@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.0 — lado MMI.
+// Contrato DSP↔RCP v1.1 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 0;
+export const VERSION_MINOR = 1;
 
 const LE = true;
 
@@ -833,8 +833,8 @@ export interface Config {
   polarizationMode: number;
   /** Relleno explícito; vale 0. */
   pad0: number;
-  /** Relleno explícito; vale 0. */
-  pad1: number;
+  /** Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst). */
+  burstWindowBins: number;
 }
 
 export const CONFIG_SIZE = 84;
@@ -869,7 +869,7 @@ export const CONFIG_OFFSETS = {
   wavelengthM: 76,
   polarizationMode: 80,
   pad0: 81,
-  pad1: 82,
+  burstWindowBins: 82,
 } as const;
 
 export function decodeConfig(view: DataView, base = 0): Config {
@@ -903,7 +903,7 @@ export function decodeConfig(view: DataView, base = 0): Config {
     wavelengthM: view.getFloat32(base + 76, LE),
     polarizationMode: view.getUint8(base + 80),
     pad0: view.getUint8(base + 81),
-    pad1: view.getUint16(base + 82, LE),
+    burstWindowBins: view.getUint16(base + 82, LE),
   };
 }
 
@@ -938,7 +938,7 @@ export function encodeConfig(value: Config, view?: DataView, base = 0): DataView
   dv.setFloat32(base + 76, value.wavelengthM, LE);
   dv.setUint8(base + 80, value.polarizationMode);
   dv.setUint8(base + 81, value.pad0);
-  dv.setUint16(base + 82, value.pad1, LE);
+  dv.setUint16(base + 82, value.burstWindowBins, LE);
   return dv;
 }
 

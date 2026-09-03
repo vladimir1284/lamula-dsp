@@ -388,7 +388,7 @@ fn decode_config_body(body: &[u8]) -> Result<Config, RcpLinkError> {
         wavelength_m: f32::from_le_bytes(body[76..80].try_into().unwrap()),
         polarization_mode: body[80],
         pad0: body[81],
-        pad1: u16::from_le_bytes(body[82..84].try_into().unwrap()),
+        burst_window_bins: u16::from_le_bytes(body[82..84].try_into().unwrap()),
     })
 }
 

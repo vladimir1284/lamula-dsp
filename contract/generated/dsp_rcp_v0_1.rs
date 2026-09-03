@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.0 — lado DSP.
+// Contrato DSP↔RCP v1.1 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 0;
+pub const VERSION_MINOR: u8 = 1;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -399,8 +399,8 @@ pub struct Config {
     pub polarization_mode: u8,
     /// Relleno explícito; vale 0.
     pub pad0: u8,
-    /// Relleno explícito; vale 0.
-    pub pad1: u16,
+    /// Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst).
+    pub burst_window_bins: u16,
 }
 pub const CONFIG_SIZE: usize = 84;
 

@@ -213,7 +213,7 @@ fn build_config_frame(cfg: &Config) -> Vec<u8> {
     buf.extend_from_slice(&cfg.wavelength_m.to_le_bytes());
     buf.push(cfg.polarization_mode);
     buf.push(cfg.pad0);
-    buf.extend_from_slice(&cfg.pad1.to_le_bytes());
+    buf.extend_from_slice(&cfg.burst_window_bins.to_le_bytes());
     assert_eq!(buf.len(), HEADER_SIZE + CONFIG_SIZE);
     buf
 }
@@ -250,7 +250,7 @@ fn decode_config_is_inverse_of_hand_built_frame() {
         wavelength_m: 0.1,
         polarization_mode: 0,
         pad0: 0,
-        pad1: 0,
+        burst_window_bins: 0,
     };
     let frame = build_config_frame(&cfg);
 

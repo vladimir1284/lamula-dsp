@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 0
+version_minor = 1
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -323,7 +323,7 @@ fields = [
   { name = "wavelength_m", type = "f32", doc = "Longitud de onda, metros. Escala la velocidad." },
   { name = "polarization_mode", type = "u8", doc = "Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único." },
   { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
-  { name = "pad1", type = "u16", doc = "Relleno explícito; vale 0." },
+  { name = "burst_window_bins", type = "u16", doc = "Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst)." },
 ]
 
 [[message]]
