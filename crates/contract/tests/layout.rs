@@ -47,14 +47,14 @@ macro_rules! check_layout {
 }
 
 // ---------------------------------------------------------------------------
-// DRx↔DSP v0.1 — vendorizado, congelado por D-08 del proyecto DRx.
+// DRx↔DSP v0.2 — vendorizado, congelado por D-08 del proyecto DRx.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn drx_identidad() {
     assert_eq!(drx_dsp::MAGIC, 0x4C4D_4452, "magic no es \"LMDR\"");
     assert_eq!(drx_dsp::VERSION_MAJOR, 0);
-    assert_eq!(drx_dsp::VERSION_MINOR, 1);
+    assert_eq!(drx_dsp::VERSION_MINOR, 2);
 }
 
 #[test]

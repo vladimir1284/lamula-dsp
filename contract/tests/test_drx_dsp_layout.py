@@ -142,7 +142,7 @@ MESSAGES = {
 # little-endian; que coincida es lo primero que mira el ingestor antes de
 # fiarse de un byte del flujo.
 EXPECTED_MAGIC = 0x4C4D4452
-EXPECTED_VERSION = (0, 1)
+EXPECTED_VERSION = (0, 2)
 
 # Identificadores de mensaje. El sentido va anotado porque el DSP sólo debe
 # emitir los "down" y sólo debe aceptar los "up": un identificador que cambiara

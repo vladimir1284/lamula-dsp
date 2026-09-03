@@ -248,10 +248,44 @@ tiene campo en `Config`~~ — **cerrado** (ver más abajo). (4)
 `polarimetric_moments_alternating` pide `sigma_v_mps` (ancho espectral) ya
 estimado por celda; con el pulse-pair de canal único eso existe
 (`PulsePairEstimate::spectrum_width_mps`), pero con el pulse-pair propio de
-(2) todavía sin escribir no hay de dónde tomarlo. Ninguno de los cuatro se
-resuelve agregando otro campo al contrato — son decisiones de
-`crates/ingest`/`crates/service` o constantes locales sin respaldo de
-oráculo, igual que otros huecos ya documentados en `crates/service::ray`.
+(2) todavía sin escribir no hay de dónde tomarlo.
+
+**(1) era más grave de lo que esta sección decía: no era sólo falta de
+documentación, era falta de campo en el contrato upstream — parcialmente
+cerrado.** El contrato `DRx↔DSP` v0.1 vendorizado no tenía ningún campo por
+pulso que indicara si ese pulso transmitió H o V: `ray_flags` sólo definía
+`FIRST_AFTER_CONFIG` (bit 8); `pulse_mode` es el modo de ancho de pulso
+vigente y `channel_mask` son los canales físicos de recepción presentes,
+ninguno de los dos codifica polarización de transmisión.
+`polarimetric_moments_alternating` (`crates/polarimetry/src/covariance.rs`)
+exige `h[]`/`v[]` ya separados por paridad de pulso a retardo medio-PRT; sin
+ese bit en el cable, `crates/ingest::assembly::RadialAssembler` no tenía con
+qué separar la serie intercalada en dos subseries por polarización.
+
+Se pidió el campo al proyecto `lamula-drx` y ya existe: bit `tx_pol_v`
+(valor 16) en el enum `ray_flag`, `DRx↔DSP` v0.1 → v0.2 (aditivo, uno de los
+4 bits libres que quedaban tras `azel_invalid`/`ddc_overflow`/`truncated`/
+`first_after_config` — no crece el mensaje `Ray`, así que fue
+`version_minor`, no ruptura). Commit `31cec50` en `lamula-drx`, pusheado a
+`origin/main`. Revendorizado acá: `contract/vendor/UPSTREAM.toml` apunta a
+ese commit, `contract/vendor/drx_dsp_v0_1.{rs,py}` regenerados y verificados
+contra su hash (`tools/check_vendored_contract.py --strict` en verde).
+
+**Lo que esto NO resuelve todavía**: el bit sólo existe en el cable; nadie en
+`crates/ingest`/`crates/service` lo lee. Queda por hacer, en este orden: (a)
+`RawPulseFrame`/`AssembledRadial` tienen que empezar a llevar `ray_flags`
+pulso a pulso (hoy `RadialAssembler::finish` ni lo copia al radial
+ensamblado — se descarta al armar `AssembledRadial`); (b) con eso,
+`crates/ingest::assembly` puede separar `channels[c]` en dos subseries `h`/
+`v` por paridad de `tx_pol_v` — ahí se resuelve de una vez la convención
+canal↔polarización que (1) pedía documentar, porque deja de ser una
+convención implícita y pasa a ser un hecho leído del wire; (c) siguen en pie
+(2) y (4) tal como estaban redactados (pulse-pair propio de modo alternante,
+origen de `sigma_v_mps`), ninguno de los dos se resuelve con el bit solo.
+Ninguno de (2)/(4) se resuelve agregando otro campo al contrato `DSP↔RCP` —
+son decisiones de `crates/ingest`/`crates/service` o constantes locales sin
+respaldo de oráculo, igual que otros huecos ya documentados en
+`crates/service::ray`.
 
 **`antenna_isolation_db` — cerrado: campo nuevo en `Config`, `DSP↔RCP` v0.2 →
 v1.0.** A diferencia de `polarization_mode`, no quedaba relleno suficiente en

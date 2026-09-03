@@ -27,7 +27,7 @@
 #[path = "../../../contract/generated/dsp_rcp_v0_1.rs"]
 pub mod dsp_rcp;
 
-/// Contrato DRx↔DSP v0.1. Vendorizado del proyecto LAMULA DRx.
+/// Contrato DRx↔DSP v0.2. Vendorizado del proyecto LAMULA DRx.
 ///
 /// El `rustfmt::skip` no es cosmético y no se quita: rustfmt desciende por las
 /// declaraciones de módulo, así que sin él un `cargo fmt` reescribe el fichero

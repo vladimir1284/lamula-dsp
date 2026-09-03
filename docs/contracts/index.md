@@ -7,7 +7,7 @@ es **quién manda**.
 
 | Contrato | Lo posee | Esquema | Se genera para |
 | --- | --- | --- | --- |
-| `DRx↔DSP` v0.1 | Proyecto LAMULA DRx | `contract/schema/drx_dsp_v0_1.toml` del repositorio del DRx | C (DRx), Rust (DSP), Python (pruebas) |
+| `DRx↔DSP` v0.2 | Proyecto LAMULA DRx | `contract/schema/drx_dsp_v0_1.toml` del repositorio del DRx | C (DRx), Rust (DSP), Python (pruebas) |
 | `DSP↔RCP` v1.0 | **Este proyecto** | `contract/schema/dsp_rcp_v0_1.toml` | Rust (DSP), Python (RCP), TypeScript (MMI) |
 
 ## DRx↔DSP: se consume, no se decide

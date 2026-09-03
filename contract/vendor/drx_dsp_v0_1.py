@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/drx_dsp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DRx↔DSP v0.1 — referencia
+Contrato DRx↔DSP v0.2 — referencia
 de los tests de contrato. Es la tercera implementación generada de la misma
 fuente: si esta y la de C no producen los mismos bytes, el codegen está mal.
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4452
 VERSION_MAJOR = 0
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 
 @dataclass
 class Header:
@@ -192,6 +192,7 @@ class RayFlag:
     DDC_OVERFLOW = 2
     TRUNCATED = 4
     FIRST_AFTER_CONFIG = 8
+    TX_POL_V = 16
 
 class BiteFlag:
     """Catálogo de fallos del plan de testing."""
