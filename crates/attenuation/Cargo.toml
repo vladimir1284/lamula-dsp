@@ -1,0 +1,17 @@
+[package]
+name = "lamula-attenuation"
+description = "Corrección de atenuación por lluvia (Z-PHI, Testud et al. 2000) del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+lamula-calibration = { path = "../calibration" }
+lamula-kdp = { path = "../kdp" }
+lamula-noise = { path = "../noise" }
+lamula-polarimetry = { path = "../polarimetry" }
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"

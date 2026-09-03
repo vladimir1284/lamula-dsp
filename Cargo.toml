@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/contract", "crates/simulator", "crates/noise", "crates/calibration", "crates/range", "crates/burst", "crates/moments", "crates/quality", "crates/spectral", "crates/clutter", "crates/rfi", "crates/dual-prf", "crates/staggered-prt", "crates/polarimetry", "crates/kdp", "crates/pol-calibration", "crates/spectrum-analyzer", "crates/range-dealias", "crates/ingest", "crates/rcp-link", "crates/service"]
+members = ["crates/contract", "crates/simulator", "crates/noise", "crates/calibration", "crates/range", "crates/burst", "crates/moments", "crates/quality", "crates/spectral", "crates/clutter", "crates/rfi", "crates/dual-prf", "crates/staggered-prt", "crates/polarimetry", "crates/kdp", "crates/pol-calibration", "crates/spectrum-analyzer", "crates/range-dealias", "crates/attenuation", "crates/ingest", "crates/rcp-link", "crates/service"]
 
 [workspace.package]
 version = "0.1.0"

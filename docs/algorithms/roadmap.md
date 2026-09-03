@@ -99,7 +99,7 @@ entre algoritmos.
 | 0 (W1–3) | [Simulador de I/Q](simulador-iq.md); kernel numérico (FFT, ventanas, SIMD); arnés de oráculo en Python |
 | 1 → M1 (W4–10) | [Ruido y umbrales](ruido-y-umbrales.md); potencia → UZ y [cadena de calibración](reflectivity-calibration.md); [procesamiento de rango y modos de barrido](procesamiento-de-rango.md); [burst, corrección de fase y AFC](burst-fase-afc.md) |
 | 2 → M2 (W11–18) | [Pulse-pair](pulse-pair-moments.md); [índices de calidad](indices-de-calidad.md); [estimador espectral](estimador-espectral.md); [GMAP](gmap-clutter-filtering.md) y [mapas de clutter](mapas-de-clutter.md); [filtrado de RFI](rfi-filtrado.md); [dual-PRF](dual-prf-dealiasing.md); [staggered-PRT](staggered-prt.md) |
-| 3 → M3 (W19–27) | [Covarianzas polarimétricas](polarimetria-covarianzas.md); [KDP](kdp-estimacion.md); [calibración polarimétrica](calibracion-polarimetrica.md); [dealiasing de rango](dealiasing-de-rango.md); [analizador de espectro de FI](analizador-espectro-fi.md) |
+| 3 → M3 (W19–27) | [Covarianzas polarimétricas](polarimetria-covarianzas.md); [KDP](kdp-estimacion.md); [calibración polarimétrica](calibracion-polarimetrica.md); [dealiasing de rango](dealiasing-de-rango.md); [analizador de espectro de FI](analizador-espectro-fi.md); [corrección de atenuación Z-PHI](atenuacion-zphi.md) |
 | 4 → M4 (W28–34) | Validación de exactitud contra varianza teórica y regresión Vesta; gates de rendimiento |
 
 **Estado del paso 1 del método (oráculo en Python).** Completo para todo el
@@ -163,9 +163,13 @@ en magnetrón, reutilizando sin reimplementar `crates/burst` y
 `crates/moments`) y para
 [analizador de espectro de FI](analizador-espectro-fi.md)
 (`crates/spectrum-analyzer`: periodograma de Welch con normalización de
-ganancia coherente y corrección ENBW explícita para el suelo de ruido).
-Con esto queda completa la fase 3 del plan de trabajo en los pasos 2 y 3
-del método.
+ganancia coherente y corrección ENBW explícita para el suelo de ruido) y para
+[corrección de atenuación Z-PHI](atenuacion-zphi.md) (`crates/attenuation`:
+perfil de atenuación específica cerrado, Testud et al. 2000, cableado sobre
+CZ en `crates/service::ray` — el alcance nuevo que "Decisiones cerradas" más
+abajo decidió agregarle a CZ). Con esto queda completa la fase 3 del plan de
+trabajo en los pasos 2 y 3 del método, incluido este último algoritmo que no
+estaba en la tabla original de esta sección.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,
@@ -219,18 +223,28 @@ la responsabilidad de DRx es el cableado físico de canales, la de este
 contrato es declarar el modo.
 
 **Qué significa exactamente CZ — cerrada: se expande a incluir corrección de
-atenuación.** Por herencia de Vesta/Sigmet, CZ era hasta ahora "reflectividad
-tras el filtro de clutter" (`crates/service::ray`, ya implementado); UZ
-sigue siendo la reflectividad sin filtrar. Se decide que CZ incluya además
-corrección de atenuación vía Z-PHI (Testud et al. 2000). Esto es alcance
-nuevo, no una aclaración de documentación: falta la página del algoritmo en
-`docs/algorithms/`, el oráculo en Python bajo `tools/oracles/` (método de
-estudio de esta misma página, primer paso obligatorio antes de tocar Rust),
-y el crate o extensión de `crates/calibration`/`crates/polarimetry` que lo
-implemente — Z-PHI consume el perfil de ΦDP/KDP ya calibrado y necesita su
-propio criterio de aceptación (restricción de autoconsistencia, no sólo
-sesgo). No está en ninguna fase de la tabla de "Orden de trabajo" todavía;
-al planificarlo, encaja después de KDP (fase 3) porque depende de él.
+atenuación. Implementada.** Por herencia de Vesta/Sigmet, CZ era hasta ahora
+"reflectividad tras el filtro de clutter" (`crates/service::ray`); UZ sigue
+siendo la reflectividad sin filtrar. Se decidió que CZ incluya además
+corrección de atenuación vía Z-PHI (Testud et al. 2000) — alcance nuevo, no
+una aclaración de documentación. Los tres pasos del método están hechos:
+página del algoritmo ([corrección de atenuación Z-PHI](atenuacion-zphi.md)),
+oráculo (`tools/oracles/atenuacion_zphi.ipynb`) y crate nuevo
+(`crates/attenuation`, no una extensión de `crates/calibration`/
+`crates/polarimetry` — la fórmula de Testud es lo bastante propia como para
+justificar su propio crate), cableado sobre CZ en `crates/service::ray` para
+cada tramo contiguo con segundo canal válido, con test de contraste
+(`crates/attenuation/tests/against_oracle.rs`) y test de cableo propio
+(`ray::tests::zphi_correction_recovers_attenuated_cz_on_dual_channel_radial`).
+El criterio de aceptación es, como se anticipaba, la restricción de
+autoconsistencia (no sólo sesgo) — ver "Cómo funciona" de la página del
+algoritmo. **Fórmula reconstruida de memoria de la literatura, verificada
+contra Py-ART pero no contra el paper original de Testud** (sin acceso a él
+en este entorno) — la página del algoritmo lo señala como pendiente de
+contrastar antes de tratar el crate como validado externamente. Los
+coeficientes `β`/`a_coef` de la fórmula quedan fijos como constantes locales
+en `crates/service::ray` (banda C por defecto), mismo tipo de hueco sin
+campo propio en el contrato que `polarization_mode` — ver arriba.
 
 ## Referencias abiertas / implementaciones libres
 

@@ -30,6 +30,7 @@ El DSP no asume una configuración concreta de radar. Todo el conjunto se diseñ
 | [Estimador espectral](estimador-espectral.md) | Alternativa de mayor coste para espectros multimodales o con clutter residual |
 | [Índices de calidad](indices-de-calidad.md) | SQI, CCOR y SIG: el contexto sin el cual un momento es un número suelto |
 | [Calibración de reflectividad](reflectivity-calibration.md) | Trazabilidad de la reflectividad medida a un valor físico en dBZ |
+| [Corrección de atenuación Z-PHI](atenuacion-zphi.md) | Recuperar Z tras lluvia intensa usando ΔΦDP como restricción, sin necesitar la constante de la relación Z-atenuación |
 
 ## Polarimetría
 

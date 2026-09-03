@@ -151,6 +151,7 @@
 //! hardware (magnetrón vs coherente) con que decidir si esa recuperación
 //! aplicaría — ver "Decisiones cerradas" en `docs/algorithms/roadmap.md`.
 
+use lamula_attenuation::zphi_correct_dbz;
 use lamula_calibration::power_to_dbz;
 use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
 use lamula_contract::dsp_rcp::{
@@ -214,9 +215,31 @@ const DUAL_PRF_MAX_FOLD_SEARCH: i64 = 3;
 /// `tools/oracles/gmap_clutter_filtering.ipynb`.
 const GMAP_SIGNAL_MARGIN: f64 = 3.0;
 
-/// `(zdr, rhohv, phidp, kdp)` por celda, sólo con segundo canal — ver el
-/// doc-comment del módulo.
-type PolarimetricValues = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>);
+/// Exponente `β` de la relación de acoplamiento atenuación-KDP que asume
+/// `lamula_attenuation::zphi_correct_dbz` (`docs/algorithms/
+/// atenuacion-zphi.md`) — NO es un campo de `Config`, mismo tipo de hueco
+/// que `KDP_WINDOW_GATES`. 0.64884 es el valor que documenta Gu et al.
+/// (2011) y usa Py-ART (`pyart.correct.calculate_attenuation_zphi`), común a
+/// las tres bandas de su tabla de coeficientes — ver el doc-comment del
+/// crate para el porqué (no hay acceso al paper original en este entorno).
+const ZPHI_BETA: f64 = 0.64884;
+
+/// Coeficiente de acoplamiento atenuación-fase `a_coef` [dB/grado] de
+/// `lamula_attenuation::zphi_correct_dbz`, banda C (0.08, Gu et al. 2011 vía
+/// Py-ART) — el contrato v0.1 no tiene un campo de banda del radar con que
+/// elegir S/C/X automáticamente a partir de `wavelength_m` (mismo tipo de
+/// hueco que `polarization_mode`, ver `docs/algorithms/roadmap.md`
+/// §"Decisiones cerradas"); banda C es el valor por defecto declarado hasta
+/// que exista ese campo o una constante de configuración local real.
+const ZPHI_A_COEF_DB_PER_DEG: f64 = 0.08;
+
+/// `(zdr, rhohv, phidp, kdp, phidp_unwrapped)` por celda, sólo con segundo
+/// canal — ver el doc-comment del módulo. `phidp_unwrapped` (grados, la
+/// misma serie que ya usa `kdp_window_fit`) se conserva aparte de `phidp`
+/// (que sale módulo 360°, tal cual mide `lamula_polarimetry`) porque la
+/// corrección de atenuación Z-PHI necesita el ΔΦDP de un tramo completo, no
+/// el valor de una sola celda — ver su uso más abajo.
+type PolarimetricValues = (Vec<f32>, Vec<f32>, Vec<f32>, Vec<f32>, Vec<f64>);
 
 /// Última medida de velocidad pulse-pair (sin desdoblar) y reflectividad
 /// cruda (`uz_db`) de un radial, para emparejarla con el siguiente en modo
@@ -890,8 +913,54 @@ pub fn build_moment_ray(
                 .map(|k| k.map(|v| v as f32).unwrap_or(f32::NAN))
                 .collect();
 
-            (zdr, rhohv, phidp, kdp)
+            (zdr, rhohv, phidp, kdp, phidp_unwrapped)
         });
+
+    // Corrección de atenuación Z-PHI sobre CZ (Testud et al. 2000, ver
+    // `lamula_attenuation`) — el alcance nuevo que `docs/algorithms/
+    // roadmap.md` §"Decisiones cerradas" ("Qué significa exactamente CZ")
+    // decide agregar a su significado, sólo alcanzable con segundo canal
+    // (ΦDP). Se aplica sobre cada tramo contiguo MAXIMAL donde tanto
+    // `cz_values` como `phidp_unwrapped` están definidos: `phidp_unwrapped`
+    // puede tener más de un tramo así en un mismo rayo si hay más de un
+    // parche de lluvia separado por celdas censuradas (una celda `NaN` de
+    // `unwrap_deg` no corrompe el desdoblado de las celdas válidas
+    // siguientes, sólo dentro del hueco mismo — ver su doc-comment). Tramos
+    // de una sola celda (sin intervalo que integrar, `zphi_correct_dbz`
+    // exige al menos dos) se dejan sin corregir. **Inferencia mía sin
+    // respaldo de oráculo**: ni la página del algoritmo ni el oráculo
+    // (`tools/oracles/atenuacion_zphi.ipynb`) cubren la interacción con
+    // rayos que combinan varios parches de lluvia y huecos censurados; el
+    // criterio de segmentación es el más simple que respeta "censura, no
+    // corrige" sobre lo que no se puede medir con confianza.
+    if let Some((_, _, _, _, phidp_unwrapped)) = &polarimetric {
+        let gate_spacing_km = config.gate_spacing_m as f64 / 1000.0;
+        let mut run_start: Option<usize> = None;
+        for i in 0..=cz_values.len() {
+            let valid =
+                i < cz_values.len() && !cz_values[i].is_nan() && phidp_unwrapped[i].is_finite();
+            if valid {
+                run_start.get_or_insert(i);
+                continue;
+            }
+            if let Some(start) = run_start.take() {
+                if i - start >= 2 {
+                    let z_dbz: Vec<f64> = cz_values[start..i].iter().map(|&v| v as f64).collect();
+                    let delta_phidp = phidp_unwrapped[i - 1] - phidp_unwrapped[start];
+                    let corrected = zphi_correct_dbz(
+                        &z_dbz,
+                        gate_spacing_km,
+                        ZPHI_BETA,
+                        ZPHI_A_COEF_DB_PER_DEG,
+                        delta_phidp,
+                    );
+                    for (dst, v) in cz_values[start..i].iter_mut().zip(corrected) {
+                        *dst = v as f32;
+                    }
+                }
+            }
+        }
+    }
 
     let az_start_deg =
         ssi_counts_to_deg(radial.azimuth_raw, ssi_counts_per_turn, ssi_zero_offset_deg) as f32;
@@ -988,9 +1057,15 @@ pub fn build_moment_ray(
                 // `CORRECTED` va siempre, no sólo cuando el bloque no tiene
                 // NaN: describe que ESTE momento (a diferencia de UZ) lleva
                 // la ecuación del radar aplicada, no el estado de censura
-                // de una celda en particular. `FILTERED` igual, cuando el
-                // filtro de clutter está activo (único bloque afectado, ver
-                // el doc-comment del módulo).
+                // de una celda en particular — y, con segundo canal
+                // presente, también la corrección de atenuación Z-PHI (ver
+                // el bloque que mutó `cz_values` más arriba y el
+                // doc-comment de `PolarimetricValues`); no hay una bandera
+                // propia en el contrato v0.1 para distinguir "corregida sólo
+                // por ecuación del radar" de "corregida además de
+                // atenuación", así que ambos casos publican `CORRECTED`.
+                // `FILTERED` igual, cuando el filtro de clutter está activo
+                // (único bloque afectado, ver el doc-comment del módulo).
                 flags: moment_flags(&cz_values)
                     | moment_flag::CORRECTED
                     | if clutter_results.is_some() {
@@ -1025,7 +1100,7 @@ pub fn build_moment_ray(
             });
         }
     }
-    if let Some((zdr_values, rhohv_values, phidp_values, kdp_values)) = polarimetric {
+    if let Some((zdr_values, rhohv_values, phidp_values, kdp_values, _)) = polarimetric {
         if config.moment_mask & (1 << moment_kind::ZDR) != 0 {
             moments.push(MomentBlock {
                 field: MomentField {
@@ -1472,6 +1547,92 @@ mod tests {
         assert!(
             (mid as f64 - K0_DEG_PER_KM).abs() < 1.0,
             "KDP recuperado ({mid}) debería acercarse a K0={K0_DEG_PER_KM} deg/km"
+        );
+    }
+
+    #[test]
+    fn zphi_correction_recovers_attenuated_cz_on_dual_channel_radial() {
+        // Perfil de Z verdadero constante (30 dBZ) atenuado con A verdadero
+        // constante (perfil de Z constante -> atenuación constante en el
+        // modelo Z-A acoplado) y ΔΦDP acorde a `ZPHI_A_COEF_DB_PER_DEG`,
+        // generado a través de IQ dual-pol real por celda -- misma técnica
+        // que `kdp_window_fit_recovers_slope_from_dual_channel_radial`, pero
+        // con potencia variable en vez de constante para que la ecuación del
+        // radar por sí sola NO explique el CZ recuperado.
+        use lamula_calibration::dbz_to_power;
+
+        const GATE_SPACING_KM: f64 = 0.150;
+        const N_GATES: usize = 40;
+        const RADAR_CONSTANT_DB: f64 = -20.0;
+        const START_RANGE_KM: f64 = 5.0;
+        const Z_TRUE_DBZ: f64 = 30.0;
+        const A_TRUE_DB_PER_KM: f64 = 0.3;
+
+        let kdp_true_deg_per_km = A_TRUE_DB_PER_KM / ZPHI_A_COEF_DB_PER_DEG;
+        let far = N_GATES - 5;
+        let uncorrected_bias_db = 2.0 * A_TRUE_DB_PER_KM * far as f64 * GATE_SPACING_KM;
+        assert!(
+            uncorrected_bias_db > 2.0,
+            "escenario de prueba debería tener atenuación significativa sin corregir: {uncorrected_bias_db} dB"
+        );
+
+        // Promediado sobre varias realizaciones (mismo criterio que
+        // `crates/calibration/tests/against_oracle.rs`): una sola ráfaga por
+        // celda deja bastante ruido de potencia y de fase como para que el
+        // sesgo de UNA realización no sea representativo del método.
+        const N_TRIALS: usize = 15;
+        let mut rng = StdRng::seed_from_u64(20260902);
+        let mut recovered_sum = 0.0;
+        for _ in 0..N_TRIALS {
+            let mut h_channel = Vec::with_capacity(N_GATES);
+            let mut v_channel = Vec::with_capacity(N_GATES);
+            for i in 0..N_GATES {
+                let range_km = START_RANGE_KM + i as f64 * GATE_SPACING_KM;
+                let two_way_atten_db = 2.0 * A_TRUE_DB_PER_KM * i as f64 * GATE_SPACING_KM;
+                let power_s =
+                    dbz_to_power(Z_TRUE_DBZ - two_way_atten_db, range_km, RADAR_CONSTANT_DB);
+                let cell = CellParams {
+                    power_s,
+                    mean_v: 3.0,
+                    sigma_v: 1.0,
+                    wavelength_m: 0.10,
+                    prt_s: 1.0 / 1000.0,
+                    m: 128,
+                    noise_floor: 0.001,
+                };
+                let dual = DualPolParams {
+                    zdr_db: 0.0,
+                    rho_hv: 0.999,
+                    phidp_deg: 2.0 * kdp_true_deg_per_km * i as f64 * GATE_SPACING_KM,
+                };
+                let (h, v) = generate_dual_pol_cell(&cell, &dual, &mut rng);
+                h_channel.push(h);
+                v_channel.push(v);
+            }
+            let radial = radial_from_channels(vec![h_channel, v_channel]);
+            let mut config = polarimetric_config(ALL_MOMENTS_MASK);
+            config.gate_spacing_m = (GATE_SPACING_KM * 1000.0) as f32;
+            config.start_range_m = (START_RANGE_KM * 1000.0) as f32;
+            config.radar_constant_db = RADAR_CONSTANT_DB as f32;
+
+            let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+            let UpMessage::MomentRay { moments, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            let cz_block = moments
+                .iter()
+                .find(|m| m.field.kind == moment_kind::CZ)
+                .expect("falta el bloque de CZ");
+            recovered_sum += cz_block.values[far] as f64;
+        }
+        let recovered_mean = recovered_sum / N_TRIALS as f64;
+
+        // Celda lejana: atenuación acumulada sin corregir de varios dB --
+        // comprueba que la corrección, no sólo la ecuación del radar,
+        // recuperó el valor verdadero.
+        assert!(
+            (recovered_mean - Z_TRUE_DBZ).abs() < 1.5,
+            "CZ corregido ({recovered_mean:.3}) debería acercarse a Z verdadero ({Z_TRUE_DBZ}); el sesgo sin corregir hubiera sido {uncorrected_bias_db} dB"
         );
     }
 

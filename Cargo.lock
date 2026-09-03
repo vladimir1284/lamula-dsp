@@ -32,6 +32,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-attenuation"
+version = "0.1.0"
+dependencies = [
+ "lamula-calibration",
+ "lamula-kdp",
+ "lamula-noise",
+ "lamula-polarimetry",
+ "lamula-simulator",
+ "rand",
+]
+
+[[package]]
 name = "lamula-burst"
 version = "0.1.0"
 dependencies = [
@@ -70,6 +82,7 @@ version = "0.1.0"
 name = "lamula-dsp-service"
 version = "0.1.0"
 dependencies = [
+ "lamula-attenuation",
  "lamula-calibration",
  "lamula-clutter",
  "lamula-contract",

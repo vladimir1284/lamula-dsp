@@ -22,6 +22,7 @@ lamula-kdp = { path = "../kdp" }
 lamula-dual-prf = { path = "../dual-prf" }
 lamula-staggered-prt = { path = "../staggered-prt" }
 lamula-calibration = { path = "../calibration" }
+lamula-attenuation = { path = "../attenuation" }
 lamula-clutter = { path = "../clutter" }
 lamula-spectral = { path = "../spectral" }
 lamula-rfi = { path = "../rfi" }
