@@ -1336,6 +1336,10 @@ mod tests {
     }
 
     fn radial_from_channels(channels: Vec<Vec<Vec<Complex64>>>) -> AssembledRadial {
+        let n_pulses = channels
+            .first()
+            .and_then(|c| c.first())
+            .map_or(0, Vec::len);
         AssembledRadial {
             seq_start: 1,
             timestamp_ns_start: 0,
@@ -1348,6 +1352,7 @@ mod tests {
             cell_mode: 0,
             channel_mask: if channels.len() > 1 { 0b0011 } else { 0b0001 },
             channels,
+            ray_flags: vec![0; n_pulses],
             dropped_pulses: 0,
         }
     }

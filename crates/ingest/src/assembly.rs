@@ -22,6 +22,7 @@
 //! punto a punto no reordena en la práctica, pero esta versión no detecta
 //! reordenado, sólo pérdida (huecos de `seq` creciente).
 
+use lamula_contract::drx_dsp::ray_flag;
 use rustfft::num_complex::Complex64;
 
 use crate::error::IngestError;
@@ -43,8 +44,44 @@ pub struct AssembledRadial {
     pub cell_mode: u8,
     pub channel_mask: u8,
     pub channels: Vec<Vec<Vec<Complex64>>>,
+    /// `ray_flags` de cada pulso, en el mismo orden que las muestras de
+    /// `channels[c][bin]` — un byte por pulso, `n_pulses` de largo. Incluye
+    /// el bit `ray_flag::TX_POL_V`, que [`split_by_tx_polarization`] usa
+    /// para separar una serie en subseries H/V.
+    ///
+    /// [`split_by_tx_polarization`]: AssembledRadial::split_by_tx_polarization
+    pub ray_flags: Vec<u8>,
     /// Pulsos que faltaron en la ráfaga (huecos de `seq`), no inventados.
     pub dropped_pulses: u32,
+}
+
+impl AssembledRadial {
+    /// Separa una serie de pulsos de un canal (`channels[c][bin]`, o
+    /// cualquier serie alineada con `ray_flags`) en dos subseries por
+    /// polarización de transmisión, preservando el orden de llegada: pulsos
+    /// transmitidos en H (bit `ray_flag::TX_POL_V` a cero) y pulsos
+    /// transmitidos en V (bit a uno).
+    ///
+    /// Sólo tiene sentido con polarización alternante H/V. En canal único o
+    /// simultánea (STAR) el bit vale 0 en todos los pulsos del `DRx↔DSP` v0.2,
+    /// así que la subserie V sale vacía.
+    pub fn split_by_tx_polarization(&self, series: &[Complex64]) -> (Vec<Complex64>, Vec<Complex64>) {
+        assert_eq!(
+            series.len(),
+            self.ray_flags.len(),
+            "serie y ray_flags deben tener la misma longitud de pulsos"
+        );
+        let mut h = Vec::new();
+        let mut v = Vec::new();
+        for (&sample, &flags) in series.iter().zip(&self.ray_flags) {
+            if flags & ray_flag::TX_POL_V != 0 {
+                v.push(sample);
+            } else {
+                h.push(sample);
+            }
+        }
+        (h, v)
+    }
 }
 
 /// Junta tramas de un pulso en radiales de `n_pulses` pulsos. Un assembler
@@ -120,6 +157,8 @@ impl RadialAssembler {
         self.last_seq = None;
         let dropped_pulses = std::mem::take(&mut self.dropped_pulses);
 
+        let ray_flags: Vec<u8> = frames.iter().map(|f| f.ray_flags).collect();
+
         let first = &frames[0];
         let n_channels = first.channels.len();
         let bins = first.channels.first().map_or(0, Vec::len);
@@ -150,6 +189,7 @@ impl RadialAssembler {
             cell_mode: first.cell_mode,
             channel_mask: first.channel_mask,
             channels,
+            ray_flags,
             dropped_pulses,
         }
     }
@@ -160,6 +200,10 @@ mod tests {
     use super::*;
 
     fn frame(seq: u32, value: f64) -> RawPulseFrame {
+        frame_with_flags(seq, value, 0)
+    }
+
+    fn frame_with_flags(seq: u32, value: f64, ray_flags: u8) -> RawPulseFrame {
         RawPulseFrame {
             seq,
             timestamp_ns: seq as u64,
@@ -171,7 +215,7 @@ mod tests {
             pulse_mode: 0,
             cell_mode: 0,
             channel_mask: 0b0001,
-            ray_flags: 0,
+            ray_flags,
             channels: vec![vec![Complex64::new(value, 0.0)]],
         }
     }
@@ -214,5 +258,56 @@ mod tests {
             assembler.feed(frame(5, 2.0)),
             Err(IngestError::DuplicateSeq)
         ));
+    }
+
+    #[test]
+    fn ray_flags_are_carried_into_the_assembled_radial_in_pulse_order() {
+        let mut assembler = RadialAssembler::new(3);
+        assembler
+            .feed(frame_with_flags(0, 1.0, ray_flag::TX_POL_V))
+            .unwrap();
+        assembler.feed(frame_with_flags(1, 2.0, 0)).unwrap();
+        let radial = assembler
+            .feed(frame_with_flags(2, 3.0, ray_flag::AZEL_INVALID))
+            .unwrap()
+            .expect("3 pulsos juntados");
+
+        assert_eq!(radial.ray_flags, vec![ray_flag::TX_POL_V, 0, ray_flag::AZEL_INVALID]);
+    }
+
+    #[test]
+    fn split_by_tx_polarization_separates_h_and_v_pulses_in_arrival_order() {
+        let mut assembler = RadialAssembler::new(4);
+        assembler
+            .feed(frame_with_flags(0, 1.0, 0)) // H
+            .unwrap();
+        assembler
+            .feed(frame_with_flags(1, 2.0, ray_flag::TX_POL_V)) // V
+            .unwrap();
+        assembler
+            .feed(frame_with_flags(2, 3.0, 0)) // H
+            .unwrap();
+        let radial = assembler
+            .feed(frame_with_flags(3, 4.0, ray_flag::TX_POL_V)) // V
+            .unwrap()
+            .expect("4 pulsos juntados");
+
+        let (h, v) = radial.split_by_tx_polarization(&radial.channels[0][0]);
+        assert_eq!(h, vec![Complex64::new(1.0, 0.0), Complex64::new(3.0, 0.0)]);
+        assert_eq!(v, vec![Complex64::new(2.0, 0.0), Complex64::new(4.0, 0.0)]);
+    }
+
+    #[test]
+    fn split_by_tx_polarization_is_a_noop_when_tx_pol_v_is_never_set() {
+        let mut assembler = RadialAssembler::new(2);
+        assembler.feed(frame(0, 1.0)).unwrap();
+        let radial = assembler
+            .feed(frame(1, 2.0))
+            .unwrap()
+            .expect("2 pulsos juntados");
+
+        let (h, v) = radial.split_by_tx_polarization(&radial.channels[0][0]);
+        assert_eq!(h, radial.channels[0][0]);
+        assert!(v.is_empty());
     }
 }

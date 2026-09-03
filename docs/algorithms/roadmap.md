@@ -271,21 +271,32 @@ Se pidió el campo al proyecto `lamula-drx` y ya existe: bit `tx_pol_v`
 ese commit, `contract/vendor/drx_dsp_v0_1.{rs,py}` regenerados y verificados
 contra su hash (`tools/check_vendored_contract.py --strict` en verde).
 
-**Lo que esto NO resuelve todavía**: el bit sólo existe en el cable; nadie en
-`crates/ingest`/`crates/service` lo lee. Queda por hacer, en este orden: (a)
-`RawPulseFrame`/`AssembledRadial` tienen que empezar a llevar `ray_flags`
-pulso a pulso (hoy `RadialAssembler::finish` ni lo copia al radial
-ensamblado — se descarta al armar `AssembledRadial`); (b) con eso,
-`crates/ingest::assembly` puede separar `channels[c]` en dos subseries `h`/
-`v` por paridad de `tx_pol_v` — ahí se resuelve de una vez la convención
-canal↔polarización que (1) pedía documentar, porque deja de ser una
-convención implícita y pasa a ser un hecho leído del wire; (c) siguen en pie
-(2) y (4) tal como estaban redactados (pulse-pair propio de modo alternante,
-origen de `sigma_v_mps`), ninguno de los dos se resuelve con el bit solo.
-Ninguno de (2)/(4) se resuelve agregando otro campo al contrato `DSP↔RCP` —
-son decisiones de `crates/ingest`/`crates/service` o constantes locales sin
-respaldo de oráculo, igual que otros huecos ya documentados en
-`crates/service::ray`.
+**(a)+(b) hechos.** `RawPulseFrame` ya traía `ray_flags` decodificado del
+cable (`crates/ingest/src/wire.rs`); lo que faltaba era que
+`RadialAssembler::finish` lo descartaba al armar el radial. Ahora
+`AssembledRadial` lleva `ray_flags: Vec<u8>`, un byte por pulso en el mismo
+orden que `channels[c][bin]`, y expone
+`AssembledRadial::split_by_tx_polarization(series)`, que separa cualquier
+serie de pulsos de un canal en subseries H/V por paridad del bit
+`ray_flag::TX_POL_V` preservando el orden de llegada. Con esto la convención
+canal↔polarización que (1) pedía documentar deja de ser implícita: se lee
+del wire, no se asume. En canal único o simultánea (STAR) el bit nunca se
+fija y la subserie V sale vacía — no-op confirmado por test. Cambio acotado
+a `crates/ingest::assembly` (`AssembledRadial`, `RadialAssembler::finish`) más
+el ajuste del helper de test de `crates/service::ray` que construye
+`AssembledRadial` a mano; contraste numérico no aplica aquí (no hay fórmula,
+es reordenamiento de datos), cubierto con tests unitarios de
+`crates/ingest`. `cargo build`/`cargo test --workspace` en verde.
+
+**Lo que esto NO resuelve todavía**: nada en `crates/service::ray` consume
+todavía la subserie H/V — `split_by_tx_polarization` está expuesto pero sin
+llamador. Siguen en pie (c): (2) y (4) tal como estaban redactados
+(pulse-pair propio de modo alternante sobre las dos subseries de igual
+polarización, origen de `sigma_v_mps` para ese modo), ninguno de los dos se
+resuelve con el bit solo. Ninguno de (2)/(4) se resuelve agregando otro
+campo al contrato `DSP↔RCP` — son decisiones de `crates/ingest`/
+`crates/service` o constantes locales sin respaldo de oráculo, igual que
+otros huecos ya documentados en `crates/service::ray`.
 
 **`antenna_isolation_db` — cerrado: campo nuevo en `Config`, `DSP↔RCP` v0.2 →
 v1.0.** A diferencia de `polarization_mode`, no quedaba relleno suficiente en
