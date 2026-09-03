@@ -23,7 +23,7 @@
 // sobre todo para el vendorizado: no se puede tocar sin romper el ancla por
 // hash, así que el consumidor es quien tiene que adaptarse.
 
-/// Contrato DSP↔RCP v0.1. Propiedad de este proyecto.
+/// Contrato DSP↔RCP v1.0. Propiedad de este proyecto.
 #[path = "../../../contract/generated/dsp_rcp_v0_1.rs"]
 pub mod dsp_rcp;
 

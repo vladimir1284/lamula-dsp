@@ -45,8 +45,8 @@
 
 [meta]
 name = "dsp_rcp"
-version_major = 0
-version_minor = 2
+version_major = 1
+version_minor = 0
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -319,6 +319,7 @@ fields = [
   { name = "receiver_gain_db", type = "f32", doc = "Ganancia del receptor, dB." },
   { name = "zdr_offset_db", type = "f32", doc = "Corrección de sesgo de ZDR, dB." },
   { name = "phidp_offset_deg", type = "f32", doc = "Fase diferencial del sistema a restar, grados." },
+  { name = "antenna_isolation_db", type = "f32", doc = "Aislamiento cruzado de la antena, dB. Satura ldr_db (lamula_polarimetry::ldr_db); sin efecto salvo LDR." },
   { name = "wavelength_m", type = "f32", doc = "Longitud de onda, metros. Escala la velocidad." },
   { name = "polarization_mode", type = "u8", doc = "Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único." },
   { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },

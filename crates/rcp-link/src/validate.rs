@@ -134,6 +134,7 @@ mod tests {
             receiver_gain_db: 40.0,
             zdr_offset_db: 0.0,
             phidp_offset_deg: 0.0,
+            antenna_isolation_db: 0.0,
             wavelength_m: 0.1,
             polarization_mode: 0,
             pad0: 0,

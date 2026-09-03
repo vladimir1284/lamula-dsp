@@ -78,6 +78,7 @@ fn build_config_frame(cfg: &Config) -> Vec<u8> {
     buf.extend_from_slice(&cfg.receiver_gain_db.to_le_bytes());
     buf.extend_from_slice(&cfg.zdr_offset_db.to_le_bytes());
     buf.extend_from_slice(&cfg.phidp_offset_deg.to_le_bytes());
+    buf.extend_from_slice(&cfg.antenna_isolation_db.to_le_bytes());
     buf.extend_from_slice(&cfg.wavelength_m.to_le_bytes());
     buf.push(cfg.polarization_mode);
     buf.push(cfg.pad0);
@@ -162,6 +163,7 @@ async fn service_binary_wires_drx_to_rcp() {
         receiver_gain_db: 40.0,
         zdr_offset_db: 0.0,
         phidp_offset_deg: 0.0,
+        antenna_isolation_db: 0.0,
         wavelength_m: 0.10,
         polarization_mode: 0,
         pad0: 0,

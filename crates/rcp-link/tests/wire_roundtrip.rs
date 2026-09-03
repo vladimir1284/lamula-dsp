@@ -209,6 +209,7 @@ fn build_config_frame(cfg: &Config) -> Vec<u8> {
     buf.extend_from_slice(&cfg.receiver_gain_db.to_le_bytes());
     buf.extend_from_slice(&cfg.zdr_offset_db.to_le_bytes());
     buf.extend_from_slice(&cfg.phidp_offset_deg.to_le_bytes());
+    buf.extend_from_slice(&cfg.antenna_isolation_db.to_le_bytes());
     buf.extend_from_slice(&cfg.wavelength_m.to_le_bytes());
     buf.push(cfg.polarization_mode);
     buf.push(cfg.pad0);
@@ -245,6 +246,7 @@ fn decode_config_is_inverse_of_hand_built_frame() {
         receiver_gain_db: 40.0,
         zdr_offset_db: 0.2,
         phidp_offset_deg: 3.5,
+        antenna_isolation_db: 0.0,
         wavelength_m: 0.1,
         polarization_mode: 0,
         pad0: 0,

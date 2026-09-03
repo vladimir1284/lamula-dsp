@@ -243,8 +243,8 @@ y la autocovarianza a retardo 1 dejaría de medir sólo fase Doppler (se
 contaminaría con ZDR): hace falta un pulse-pair propio de modo alternante
 sobre las dos subsecuencias de igual polarización, mismo tipo de trabajo que
 `staggered_pulse_pair_velocities` le hizo falta a staggered-PRT, no reutilizar
-el de canal único sin más. (3) `ldr_db` pide `antenna_isolation_db`, que no
-tiene campo en `Config` — mismo tipo de hueco que `RHOHV_THRESHOLD_KDP`. (4)
+el de canal único sin más. (3) ~~`ldr_db` pide `antenna_isolation_db`, que no
+tiene campo en `Config`~~ — **cerrado** (ver más abajo). (4)
 `polarimetric_moments_alternating` pide `sigma_v_mps` (ancho espectral) ya
 estimado por celda; con el pulse-pair de canal único eso existe
 (`PulsePairEstimate::spectrum_width_mps`), pero con el pulse-pair propio de
@@ -252,6 +252,23 @@ estimado por celda; con el pulse-pair de canal único eso existe
 resuelve agregando otro campo al contrato — son decisiones de
 `crates/ingest`/`crates/service` o constantes locales sin respaldo de
 oráculo, igual que otros huecos ya documentados en `crates/service::ray`.
+
+**`antenna_isolation_db` — cerrado: campo nuevo en `Config`, `DSP↔RCP` v0.2 →
+v1.0.** A diferencia de `polarization_mode`, no quedaba relleno suficiente en
+`Config` para el campo (sólo 3 B de `pad0`+`pad1`, un `f32` necesita 4): se
+agregó como campo nuevo entre `phidp_offset_deg` y `wavelength_m`, creciendo
+`Config` de 80 a 84 B. Por la propia regla del contrato ("cualquier cambio de
+formato sube `version_minor` (compatible) o `version_major` (rompe)") y
+porque crecer el mensaje es justo lo que se evitó deliberadamente al agregar
+`polarization_mode`, esto se trató como ruptura: `version_major` 0→1,
+`version_minor` reiniciado a 0. Regenerados `contract/generated/` (Rust/
+Python/TS) y corregidos los sitios manuales que codificaban `Config` byte a
+byte (`crates/rcp-link/src/wire.rs`, `crates/contract/tests/layout.rs`, y los
+tests de `crates/rcp-link`/`crates/service`). Verificado: `cargo build
+--workspace` y `cargo test --workspace` limpios, y `contract/tests` (71/71)
+— a diferencia del cambio anterior, esta vez sí había `cargo` disponible en
+el entorno. El campo sólo se declara; `ldr_db` sigue sin cablearse en
+`crates/service::ray` porque eso depende de (1), no de este campo.
 
 **Qué significa exactamente CZ — cerrada: se expande a incluir corrección de
 atenuación. Implementada.** Por herencia de Vesta/Sigmet, CZ era hasta ahora

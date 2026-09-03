@@ -8,7 +8,7 @@ es **quién manda**.
 | Contrato | Lo posee | Esquema | Se genera para |
 | --- | --- | --- | --- |
 | `DRx↔DSP` v0.1 | Proyecto LAMULA DRx | `contract/schema/drx_dsp_v0_1.toml` del repositorio del DRx | C (DRx), Rust (DSP), Python (pruebas) |
-| `DSP↔RCP` v0.1 | **Este proyecto** | `contract/schema/dsp_rcp_v0_1.toml` | Rust (DSP), Python (RCP), TypeScript (MMI) |
+| `DSP↔RCP` v1.0 | **Este proyecto** | `contract/schema/dsp_rcp_v0_1.toml` | Rust (DSP), Python (RCP), TypeScript (MMI) |
 
 ## DRx↔DSP: se consume, no se decide
 
@@ -99,7 +99,7 @@ detrás la carga útil cuando la hay.
 | `config_ack` | 5 | DSP→RCP | 8 B | — |
 | `selftest_result` | 6 | DSP→RCP | 16 B | — |
 | `capabilities` | 7 | DSP→RCP | 20 B | — |
-| `config` | 8 | RCP→DSP | 80 B | — |
+| `config` | 8 | RCP→DSP | 84 B | — |
 | `control` | 9 | RCP→DSP | 8 B | — |
 | `selftest_request` | 10 | RCP→DSP | 8 B | — |
 

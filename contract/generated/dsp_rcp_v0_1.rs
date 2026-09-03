@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v0.2 — lado DSP.
+// Contrato DSP↔RCP v1.0 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -10,8 +10,8 @@
 #![allow(dead_code)]
 
 pub const MAGIC: u32 = 0x4C4D4453;
-pub const VERSION_MAJOR: u8 = 0;
-pub const VERSION_MINOR: u8 = 2;
+pub const VERSION_MAJOR: u8 = 1;
+pub const VERSION_MINOR: u8 = 0;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -391,6 +391,8 @@ pub struct Config {
     pub zdr_offset_db: f32,
     /// Fase diferencial del sistema a restar, grados.
     pub phidp_offset_deg: f32,
+    /// Aislamiento cruzado de la antena, dB. Satura ldr_db (lamula_polarimetry::ldr_db); sin efecto salvo LDR.
+    pub antenna_isolation_db: f32,
     /// Longitud de onda, metros. Escala la velocidad.
     pub wavelength_m: f32,
     /// Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único.
@@ -400,7 +402,7 @@ pub struct Config {
     /// Relleno explícito; vale 0.
     pub pad1: u16,
 }
-pub const CONFIG_SIZE: usize = 80;
+pub const CONFIG_SIZE: usize = 84;
 
 /// Mandato del plano de control. Se responde siempre con un config_ack.
 #[repr(C, packed)]

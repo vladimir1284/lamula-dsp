@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v0.2 — lado MMI.
+// Contrato DSP↔RCP v1.0 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -10,8 +10,8 @@
 /* eslint-disable */
 
 export const MAGIC = 0x4C4D4453;
-export const VERSION_MAJOR = 0;
-export const VERSION_MINOR = 2;
+export const VERSION_MAJOR = 1;
+export const VERSION_MINOR = 0;
 
 const LE = true;
 
@@ -825,6 +825,8 @@ export interface Config {
   zdrOffsetDb: number;
   /** Fase diferencial del sistema a restar, grados. */
   phidpOffsetDeg: number;
+  /** Aislamiento cruzado de la antena, dB. Satura ldr_db (lamula_polarimetry::ldr_db); sin efecto salvo LDR. */
+  antennaIsolationDb: number;
   /** Longitud de onda, metros. Escala la velocidad. */
   wavelengthM: number;
   /** Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único. */
@@ -835,7 +837,7 @@ export interface Config {
   pad1: number;
 }
 
-export const CONFIG_SIZE = 80;
+export const CONFIG_SIZE = 84;
 
 export const CONFIG_OFFSETS = {
   seq: 0,
@@ -863,10 +865,11 @@ export const CONFIG_OFFSETS = {
   receiverGainDb: 60,
   zdrOffsetDb: 64,
   phidpOffsetDeg: 68,
-  wavelengthM: 72,
-  polarizationMode: 76,
-  pad0: 77,
-  pad1: 78,
+  antennaIsolationDb: 72,
+  wavelengthM: 76,
+  polarizationMode: 80,
+  pad0: 81,
+  pad1: 82,
 } as const;
 
 export function decodeConfig(view: DataView, base = 0): Config {
@@ -896,10 +899,11 @@ export function decodeConfig(view: DataView, base = 0): Config {
     receiverGainDb: view.getFloat32(base + 60, LE),
     zdrOffsetDb: view.getFloat32(base + 64, LE),
     phidpOffsetDeg: view.getFloat32(base + 68, LE),
-    wavelengthM: view.getFloat32(base + 72, LE),
-    polarizationMode: view.getUint8(base + 76),
-    pad0: view.getUint8(base + 77),
-    pad1: view.getUint16(base + 78, LE),
+    antennaIsolationDb: view.getFloat32(base + 72, LE),
+    wavelengthM: view.getFloat32(base + 76, LE),
+    polarizationMode: view.getUint8(base + 80),
+    pad0: view.getUint8(base + 81),
+    pad1: view.getUint16(base + 82, LE),
   };
 }
 
@@ -930,10 +934,11 @@ export function encodeConfig(value: Config, view?: DataView, base = 0): DataView
   dv.setFloat32(base + 60, value.receiverGainDb, LE);
   dv.setFloat32(base + 64, value.zdrOffsetDb, LE);
   dv.setFloat32(base + 68, value.phidpOffsetDeg, LE);
-  dv.setFloat32(base + 72, value.wavelengthM, LE);
-  dv.setUint8(base + 76, value.polarizationMode);
-  dv.setUint8(base + 77, value.pad0);
-  dv.setUint16(base + 78, value.pad1, LE);
+  dv.setFloat32(base + 72, value.antennaIsolationDb, LE);
+  dv.setFloat32(base + 76, value.wavelengthM, LE);
+  dv.setUint8(base + 80, value.polarizationMode);
+  dv.setUint8(base + 81, value.pad0);
+  dv.setUint16(base + 82, value.pad1, LE);
   return dv;
 }
 
