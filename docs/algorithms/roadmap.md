@@ -441,10 +441,52 @@ acerca a v_true; corregido, sí. `cargo test --workspace` limpio.
 sin cablear — exige mandar el mensaje `Afc` (`nco_phase_inc`) de vuelta al
 DRx, y `crates/ingest` sólo tiene camino de lectura sobre esa conexión hoy,
 no de escritura; es trabajo aparte, de infraestructura de transporte, no de
-algoritmo. Tampoco se cableó `recover_trip1` de
-[dealiasing de rango](dealiasing-de-rango.md) con esta misma fase de burst,
-aunque el bloqueo de contrato que lo impedía ya no existe — sigue pendiente
-por no haberse hecho, no por falta de dato.
+algoritmo.
+
+**`recover_trip1` de [dealiasing de rango](dealiasing-de-rango.md) — cerrado,
+sin llamar literalmente a la función del crate.** El bloqueo de contrato que
+lo impedía (fase de burst por pulso en el wire) ya no existe desde el cableo
+de burst/AFC de arriba. Al revisar cómo cablearlo, `crates/service::ray`
+(`build_moment_ray`) resultó que ya no hacía falta invocar
+`lamula_range_dealias::recover_trip1`: `burst_phase_correct` corrige TODA
+celda de todo canal con la fase de burst de su propio pulso antes de
+cualquier pulse-pair, que es exactamente lo que hace `recover_trip1` celda a
+celda (corregir con la fase del primer trip, dejar el segundo con fase
+residual uniforme que HS74 blanquea a ruido). Las celdas con evidencia de
+trip2 en una instalación de magnetrón con burst wireado ya llegan al bloque
+de detección con el valor recuperado — sólo faltaba dejar de sobreescribirlo
+con `NaN`. Se agregó la constante local `MAGNETRON_TRANSMITTER` (mismo tipo
+de hueco sin campo propio en el contrato que `ZPHI_A_COEF_DB_PER_DEG`, ver
+más arriba) para no aplicar esta misma lógica en transmisor coherente, donde
+el segundo trip es igual de determinista que el primero y corregir con la
+fase de éste no decorrelaciona nada — ahí sigue aplicando sólo detección y
+marcado. Test de cableo nuevo
+(`ray::tests::range_dealias_recovers_trip2_evidenced_cell_when_burst_is_wired`),
+hermano del ya existente de censura pura; `cargo build`/`cargo test
+--workspace` limpios.
+
+**Bug encontrado y corregido en el mismo cableo**: escribiendo el test de
+arriba, un radial con canal único (RX_0) más canal de burst (`TX_BURST_0`)
+—exactamente el caso de instalación magnetrón mono-polar con monitor de
+burst que describe el Eje 1 de esta página— hacía entrar en pánico a
+`crates/service::ray`. La causa: el cableo polarimétrico
+(`radial.channels.len() > 1`, en dos sitios de `build_moment_ray`) decidía
+si había canal cruzado por POSICIÓN, no por qué bit de `channel_mask` es,
+así que interpretaba el canal de burst como si fuera el canal V — con menos
+bins que el canal principal (el caso real: `burst_window_bins` casi siempre
+mucho más chico que `n_bins`), esto reventaba por índice fuera de rango; con
+igual número de bins no reventaba, pero calculaba ZDR/ρHV/ΦDP/LDR sobre
+datos de burst sin sentido (no se publicaban porque `moment_mask` no los
+pide, pero se calculaban igual). No era un bug de este cableo — existía
+desde antes, éste sólo lo hizo visible. **Corregido**: los dos sitios ahora
+usan `radial.channel_index(channel::RX_1)` (`v_channel_idx`) en vez de
+`channels.len() > 1`/indexado posicional `channels[1]` — sólo hay canal
+polarimétrico si el bit `RX_1` está puesto en `channel_mask`, sea cual sea
+la posición o qué otros canales traiga el radial. Test de regresión
+`ray::tests::burst_channel_alone_does_not_trigger_polarimetric_wiring`
+(radial `RX_0 | TX_BURST_0` con bins desiguales, antes reventaba, ahora no
+publica ZDR aunque se pida). `cargo build`/`cargo test --workspace`
+limpios, `cargo fmt` aplicado.
 
 **Analizador de espectro de FI (`crates/spectrum-analyzer`) →
 `crates/service::ray` — cerrado el hueco de contrato, cableada la captura

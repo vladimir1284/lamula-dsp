@@ -139,17 +139,28 @@
 //! (`staggered_prt_split`) es una inferencia mía sin respaldo de oráculo,
 //! ver su doc-comment.
 //!
-//! Dealiasing de rango (`config.range_dealias`): sólo el nivel "detección y
-//! marcado" está cableado, cross-radial vía `PreviousPrf` igual que
-//! dual-PRF pero sin depender de `dealias_mode` — ver el doc-comment junto
-//! a `range_dealias_detected` en [`build_moment_ray`], que también explica
-//! por qué NO usa `classify_trip` de `lamula-range-dealias` (inferencia sin
-//! respaldo de oráculo). La recuperación por fase aleatoria en magnetrón
-//! (`lamula_range_dealias::recover_trip1`) sigue sin conectar: necesita fase
-//! de burst por pulso, que el wire `DRx↔DSP` no transporta en ningún campo
-//! (`crate::main` lo documenta), y el contrato tampoco tiene un campo de
-//! hardware (magnetrón vs coherente) con que decidir si esa recuperación
-//! aplicaría — ver "Decisiones cerradas" en `docs/algorithms/roadmap.md`.
+//! Dealiasing de rango (`config.range_dealias`): detección y marcado
+//! cross-radial vía `PreviousPrf` igual que dual-PRF pero sin depender de
+//! `dealias_mode` — ver el doc-comment junto a `range_dealias_detected` en
+//! [`build_moment_ray`], que también explica por qué NO usa `classify_trip`
+//! de `lamula-range-dealias` (inferencia sin respaldo de oráculo). La
+//! recuperación por fase aleatoria en magnetrón ya está cableada, pero NO
+//! llamando a `lamula_range_dealias::recover_trip1` directamente: ese bloqueo
+//! de contrato (falta de fase de burst por pulso en el wire) ya se cerró con
+//! [`burst_phase_correct`], que corrige TODA celda de todo canal con la fase
+//! de burst de su propio pulso antes de que corra cualquier pulse-pair — la
+//! misma operación, celda a celda, que hace `recover_trip1` (corregir con la
+//! fase del primer trip, dejar el segundo con fase residual uniforme que
+//! HS74 blanquea a ruido). Por eso las celdas con evidencia de trip2 en una
+//! instalación de magnetrón con burst wireado YA traen el valor recuperado
+//! en `uz_values`/`v_values`/`cz_values` cuando llegan a este bloque: no
+//! hay nada que recuperar aparte, sólo decidir no censurarlas. El contrato
+//! sigue sin un campo de hardware (magnetrón vs coherente, ver "Decisiones
+//! cerradas" en `docs/algorithms/roadmap.md`) — la distinción vive en la
+//! constante local `MAGNETRON_TRANSMITTER`, mismo tipo de hueco que
+//! `ZPHI_A_COEF_DB_PER_DEG`, porque en transmisor coherente el segundo trip
+//! es igual de determinista que el primero y corregir con la fase de éste no
+//! decorrelaciona nada — ahí sigue aplicando sólo detección y marcado.
 
 use lamula_attenuation::zphi_correct_dbz;
 use lamula_burst::{burst_phase_estimate, correct_phase};
@@ -238,6 +249,22 @@ const ZPHI_BETA: f64 = 0.64884;
 /// §"Decisiones cerradas"); banda C es el valor por defecto declarado hasta
 /// que exista ese campo o una constante de configuración local real.
 const ZPHI_A_COEF_DB_PER_DEG: f64 = 0.08;
+
+/// Tipo de transmisor de la instalación (`docs/algorithms/roadmap.md`
+/// §"Decisiones cerradas" ítem "`range_dealias` sin SZ"): `true` = magnetrón
+/// (oscilador libre, fase de burst aleatoria pulso a pulso), `false` =
+/// transmisor coherente (klistrón/TWT/estado sólido). Decide si una celda
+/// con evidencia de segundo trip (ver `range_dealias_detected` en
+/// [`build_moment_ray`]) puede recuperarse o sólo detectarse y marcarse: en
+/// magnetrón la fase del segundo trip es independiente de la del primero, y
+/// corregir con la fase de burst del primero (ya cableado en
+/// [`burst_phase_correct`]) la blanquea a ruido — recuperación real; en
+/// coherente el segundo trip es igual de determinista que el primero y esa
+/// misma corrección no decorrelaciona nada, sólo censura tiene sentido. El
+/// contrato no tiene campo de hardware con que decidir esto (mismo tipo de
+/// hueco que `ZPHI_A_COEF_DB_PER_DEG`): constante local de instalación hasta
+/// que exista uno.
+const MAGNETRON_TRANSMITTER: bool = true;
 
 /// `(zdr, rhohv, phidp, kdp, phidp_unwrapped, ldr)` por celda, sólo con
 /// segundo canal — ver el doc-comment del módulo. `phidp_unwrapped` (grados,
@@ -720,8 +747,15 @@ pub fn build_moment_ray(
     // `estimator = spectral` o alternante + filtro de clutter/RFI: ningún
     // oráculo de este repositorio cubre esa interacción, sólo la del
     // pulse-pair primario (ítem (2) del roadmap).
+    // `channel_index(RX_1)`, no `channels.len() > 1`: un radial de
+    // instalación mono-polar con canal de burst wireado (`RX_0 |
+    // TX_BURST_0`) también trae `channels.len() == 2`, y su segundo canal
+    // NO es un canal cruzado V — usar la posición cruda lo confundía con
+    // uno (hallazgo al cablear la recuperación de trip1 por fase de burst,
+    // ver `docs/algorithms/roadmap.md` §"Burst/AFC").
+    let v_channel_idx = radial.channel_index(channel::RX_1);
     let alternating =
-        config.polarization_mode == polarization_mode::ALTERNATING && radial.channels.len() > 1;
+        config.polarization_mode == polarization_mode::ALTERNATING && v_channel_idx.is_some();
     let main_channel: Vec<Cow<[Complex64]>> = radial.channels[0]
         .iter()
         .map(|series| {
@@ -993,6 +1027,13 @@ pub fn build_moment_ray(
     // `None` — "sin referencia no hay base para acusar solapamiento". No
     // hay curva de aceptación frente a SNR contrastada para este criterio;
     // el oráculo sólo la da para su modelo de blanco puntual.
+    //
+    // `can_recover_trip1`: en magnetrón (`MAGNETRON_TRANSMITTER`) con burst
+    // wireado (`burst_corrected.is_some()`), `uz_values`/`v_values`/
+    // `cz_values` en esta celda YA son el valor recuperado — ver el
+    // doc-comment del módulo. Sin las dos condiciones, no hay recuperación
+    // posible y se mantiene sólo detección y marcado.
+    let can_recover_trip1 = MAGNETRON_TRANSMITTER && burst_corrected.is_some();
     let mut range_dealias_detected = false;
     if config.range_dealias != 0 {
         let range_dealias_role: Option<bool> = match previous_prf {
@@ -1021,6 +1062,15 @@ pub fn build_moment_ray(
                     .and_then(|i| prev.uz_db.get(i))
                     .is_some_and(|v| v.is_finite());
                 if trip2_has_echo {
+                    if can_recover_trip1 {
+                        // Recuperado: valor ya corregido por
+                        // `burst_phase_correct` antes del pulse-pair, no se
+                        // toca. No se marca `range_dealias_detected` — no
+                        // hay censura que reportar en `ray_flag::CENSORED`,
+                        // mismo criterio que la corrección de clutter/RFI
+                        // (ver el doc-comment del módulo).
+                        continue;
+                    }
                     uz_values[n] = f32::NAN;
                     v_values[n] = f32::NAN;
                     cz_values[n] = f32::NAN;
@@ -1034,17 +1084,19 @@ pub fn build_moment_ray(
     // bloque UZ más abajo.
     let uz_db_for_next = uz_values.clone();
 
-    // Sólo hay ρHV/ZDR/ΦDP/KDP (y, en modo alternante, LDR) con un segundo
-    // canal (V) presente en el radial — `channel_mask`/`channels.len()` lo
-    // refleja tal cual llega del DRx.
-    let polarimetric: Option<PolarimetricValues> = (radial.channels.len() > 1).then(|| {
+    // Sólo hay ρHV/ZDR/ΦDP/KDP (y, en modo alternante, LDR) con un canal V
+    // (bit `channel::RX_1`) presente en el radial — `v_channel_idx`, no
+    // `channels.len() > 1` (ver el doc-comment junto a su cálculo, arriba):
+    // el canal de burst también cuenta para `channels.len()` sin ser un
+    // canal cruzado.
+    let polarimetric: Option<PolarimetricValues> = v_channel_idx.map(|v_idx| {
         let mut zdr = Vec::with_capacity(n_gates as usize);
         let mut rhohv = Vec::with_capacity(n_gates as usize);
         let mut phidp = Vec::with_capacity(n_gates as usize);
         let mut ldr: Vec<f32> = Vec::with_capacity(n_gates as usize);
         for (i, (h, v)) in radial.channels[0]
             .iter()
-            .zip(radial.channels[1].iter())
+            .zip(radial.channels[v_idx].iter())
             .enumerate()
         {
             let est = if alternating {
@@ -2429,6 +2481,220 @@ mod tests {
             ray.ray_flags & ray_flag::CENSORED,
             ray_flag::CENSORED,
             "detección de trip2 debería marcar ray_flag::CENSORED"
+        );
+    }
+
+    #[test]
+    fn range_dealias_recovers_trip2_evidenced_cell_when_burst_is_wired() {
+        // Mismo escenario que `range_dealias_detection_censors_only_trip2_evidenced_cells`
+        // (celda 1: sin eco en trip1, con eco en trip2), pero con
+        // `burst_window_bins` > 0 y canal de burst presente en el radial de
+        // PRF alta: `can_recover_trip1` (`MAGNETRON_TRANSMITTER` +
+        // `burst_corrected.is_some()`) debería dejar la celda sin censurar
+        // — ya trae el valor corregido por `burst_phase_correct` antes de
+        // llegar a este bloque, ver el doc-comment del módulo. Fase de
+        // burst constante en 0 en todos los pulsos: `correct_phase` con
+        // `phi=0` es la identidad, así que el valor numérico de la celda es
+        // exactamente el mismo que sin corrección — este test ejercita sólo
+        // el cableo (no censurar), no la recuperación numérica en sí, que
+        // ya contrasta `crates/burst`/`crates/range-dealias` contra oráculo.
+        let mut config = dual_prf_config();
+        config.dealias_mode = dealias_mode::NONE;
+        config.range_dealias = 1;
+        config.moment_mask = 1 << moment_kind::UZ;
+        config.burst_window_bins = 1;
+
+        let (_, prt_high, ..) = dual_prf_split(&config);
+        let r_max_high_m = SPEED_OF_LIGHT_M_S * prt_high / 2.0;
+        config.gate_spacing_m = (r_max_high_m / 3.0) as f32; // fold_gates = 3
+
+        let echo = CellParams {
+            power_s: 1.0,
+            mean_v: 0.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.2e-3,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let noise = CellParams {
+            power_s: 0.0,
+            ..echo
+        };
+
+        let mut rng = StdRng::seed_from_u64(20260902);
+
+        // Radial de PRF baja: idéntico al de
+        // `range_dealias_detection_censors_only_trip2_evidenced_cells`, sin
+        // canal de burst — la referencia no necesita recuperación.
+        let low_cells = [
+            CellParams {
+                prt_s: 1.2e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+        ];
+        let low_channel = generate_channel(&low_cells, &mut rng);
+        let mut radial_low = radial_from_channels(vec![low_channel]);
+        radial_low.prf_div = 3;
+
+        // Radial de PRF alta: mismas 4 celdas que el test hermano, más un
+        // canal `TX_BURST_0` con fase 0 en cada pulso (ventana de 1 bin).
+        let high_cells = [
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..noise
+            },
+        ];
+        let high_channel = generate_channel(&high_cells, &mut rng);
+        let n_pulses = high_channel[0].len();
+        // Un solo bin, distinto del número de bins de `high_channel`: el
+        // canal de burst NO trae el bit `channel::RX_1`, así que
+        // `v_channel_idx` (ver el doc-comment junto a su cálculo en
+        // `build_moment_ray`) no lo confunde con un canal cruzado y el
+        // desajuste de longitud entre canales es inofensivo.
+        let burst_channel = vec![vec![Complex64::new(10.0, 0.0); n_pulses]];
+        let mut radial_high = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 2,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: channel::RX_0 | channel::TX_BURST_0,
+            channels: vec![high_channel, burst_channel],
+            ray_flags: vec![0; n_pulses],
+            dropped_pulses: 0,
+        };
+        radial_high.prf_div = 2;
+
+        let (_, previous_prf) =
+            build_moment_ray(&radial_low, &config, 1, false, 1_000_000, 0.0, None);
+        let (msg, _) = build_moment_ray(
+            &radial_high,
+            &config,
+            2,
+            false,
+            1_000_000,
+            0.0,
+            Some(&previous_prf),
+        );
+        let UpMessage::MomentRay { moments, .. } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        let uz = &moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::UZ)
+            .expect("falta el bloque de UZ")
+            .values;
+
+        assert!(
+            uz[1].is_finite(),
+            "celda 1: evidencia de trip2, pero con burst wireado debería recuperarse, no censurarse"
+        );
+        // Nota: `ray_flags` sigue trayendo `CENSORED` en este escenario —
+        // la celda 3 (sin eco propio en ninguna hipótesis) se censura por
+        // `sig_threshold`/`log_threshold` de `gate_quality`, ajeno por
+        // completo a la recuperación de trip2 que este test ejercita.
+    }
+
+    #[test]
+    fn burst_channel_alone_does_not_trigger_polarimetric_wiring() {
+        // Regresión del hallazgo hecho al escribir el test anterior:
+        // instalación mono-polar (sólo `RX_0`) con canal de burst wireado
+        // (`RX_0 | TX_BURST_0`, exactamente el caso real que describe el
+        // Eje 1 de `docs/algorithms/roadmap.md`) — `channels.len() == 2`,
+        // pero el segundo canal no es un canal cruzado V. Antes de fijar
+        // `v_channel_idx` (`channel_index(RX_1)`, ver el doc-comment junto
+        // a su cálculo en `build_moment_ray`), usar `channels.len() > 1` a
+        // secas hacía que este radial entrara en pánico por índice fuera de
+        // rango en cuanto el canal de burst traía menos bins que `RX_0`
+        // (como es el caso real: `burst_window_bins` es casi siempre mucho
+        // más chico que `n_bins` del radial).
+        let config = Config {
+            moment_mask: (1 << moment_kind::UZ) | (1 << moment_kind::ZDR),
+            burst_window_bins: 1,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        let cell = CellParams {
+            power_s: 1.0,
+            mean_v: 0.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.0e-3,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let mut rng = StdRng::seed_from_u64(20260904);
+        // 3 bins de RX_0 contra 1 solo bin de burst: el desajuste de
+        // longitud que antes hacía panicar al `zip` posicional.
+        let rx0_channel = generate_channel(
+            &[
+                CellParams { ..cell },
+                CellParams { ..cell },
+                CellParams { ..cell },
+            ],
+            &mut rng,
+        );
+        let n_pulses = rx0_channel[0].len();
+        let burst_channel = vec![vec![Complex64::new(10.0, 0.0); n_pulses]];
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: channel::RX_0 | channel::TX_BURST_0,
+            channels: vec![rx0_channel, burst_channel],
+            ray_flags: vec![0; n_pulses],
+            dropped_pulses: 0,
+        };
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { moments, .. } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        assert!(
+            moments.iter().all(|m| m.field.kind != moment_kind::ZDR),
+            "sin canal RX_1, no debería publicarse ZDR aunque se pida en moment_mask"
         );
     }
 
