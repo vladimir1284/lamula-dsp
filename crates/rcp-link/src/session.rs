@@ -11,8 +11,11 @@
 //! - `enter_setup`/`stop` vuelven a `setup` sin borrar la configuración
 //!   vigente (el mensaje `config` no se re-envía tras un `stop`).
 //! - `request_status`/`request_config`/`request_capabilities`/
-//!   `reset_counters` son de sólo lectura/telemetría: se aceptan en
-//!   cualquier fase, no cambian estado.
+//!   `reset_counters`/`request_spectrum` son de sólo lectura/telemetría: se
+//!   aceptan en cualquier fase, no cambian estado. `request_spectrum` sólo
+//!   produce `spectrum_frame` si hay una ráfaga en curso que muestrear
+//!   (`crate::wire`, `crates/service`); en `setup` o `fault` la fase acepta
+//!   el mandato pero no hay traza que mandar.
 //!
 //! Deliberadamente NO cubre (huecos reales del contrato o de este repo, no
 //! omisiones descuidadas):
@@ -98,7 +101,8 @@ impl Session {
             command::REQUEST_STATUS
             | command::REQUEST_CONFIG
             | command::REQUEST_CAPABILITIES
-            | command::RESET_COUNTERS => Ok(()),
+            | command::RESET_COUNTERS
+            | command::REQUEST_SPECTRUM => Ok(()),
             _ => Err(error::UNKNOWN_MESSAGE),
         }
     }
@@ -254,6 +258,7 @@ mod tests {
             command::REQUEST_CONFIG,
             command::REQUEST_CAPABILITIES,
             command::RESET_COUNTERS,
+            command::REQUEST_SPECTRUM,
         ] {
             assert_eq!(session.handle_command(cmd), Ok(()));
             assert_eq!(session.phase(), phase::SETUP);

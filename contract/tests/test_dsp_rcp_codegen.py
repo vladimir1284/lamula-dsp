@@ -166,4 +166,4 @@ def test_el_juego_de_valores_no_es_degenerado(generated):
 
 def test_identidad_del_contrato(generated):
     assert generated.MAGIC == 0x4C4D4453, 'magic no es "LMDS"'
-    assert (generated.VERSION_MAJOR, generated.VERSION_MINOR) == (1, 1)
+    assert (generated.VERSION_MAJOR, generated.VERSION_MINOR) == (1, 2)

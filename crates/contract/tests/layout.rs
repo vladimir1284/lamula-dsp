@@ -131,7 +131,7 @@ fn drx_afc() {
 fn dsp_identidad() {
     assert_eq!(dsp_rcp::MAGIC, 0x4C4D_4453, "magic no es \"LMDS\"");
     assert_eq!(dsp_rcp::VERSION_MAJOR, 1);
-    assert_eq!(dsp_rcp::VERSION_MINOR, 1);
+    assert_eq!(dsp_rcp::VERSION_MINOR, 2);
 }
 
 /// Los dos contratos comparten forma y tamaño de cabecera a propósito, para que

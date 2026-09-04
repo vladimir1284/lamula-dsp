@@ -446,6 +446,52 @@ algoritmo. Tampoco se cableó `recover_trip1` de
 aunque el bloqueo de contrato que lo impedía ya no existe — sigue pendiente
 por no haberse hecho, no por falta de dato.
 
+**Analizador de espectro de FI (`crates/spectrum-analyzer`) →
+`crates/service::ray` — cerrado el hueco de contrato, cableada la captura
+oportunista.** `crates/spectrum-analyzer` (periodograma de Welch, ganancia
+coherente, ENBW) estaba implementado y contrastado contra oráculo, y el
+mensaje `spectrum_frame` ya existía en el contrato desde v1.0, pero no había
+forma de que el RCP lo pidiera: la enumeración `command` no tenía ningún
+mandato para `spectrum_frame`, a diferencia de `request_status`/
+`request_capabilities` para el resto de mensajes `up` bajo demanda.
+
+Se agregó `request_spectrum` (valor 7) a la enumeración `command`, aditivo,
+`DSP↔RCP` v1.1 → v1.2 — mismo criterio de versión que `burst_window_bins` más
+arriba: no cambia el tamaño de ningún mensaje, sólo agrega un valor a una
+tabla ya abierta. `crates/rcp-link::session` lo trata como el resto de
+mandatos de sólo lectura (no cambia de fase, se acepta en cualquiera).
+
+`crates/service::ray::build_spectrum_frame` sigue la recomendación de la
+página del algoritmo — "tomarlas del mismo flujo de rayos que alimenta el
+pipeline […] captura oportunista sobre el flujo vivo, sin perturbar nada" —
+en vez de un modo dedicado: reutiliza el último `AssembledRadial` ensamblado
+(cacheado en `crate::main` sólo para esto). La captura resulta de leer
+`channels[c][bin][pulso]` transpuesto respecto al resto de este módulo: cada
+*pulso* aporta una serie en tiempo rápido (a través de las `n_bins` celdas de
+rango), que es la captura que promedia `welch_trace_dbm`, en vez de la serie
+en tiempo lento (pulso a pulso) que usa el dominio Doppler del resto del
+pipeline. El tramo cubre a la vez el canal de burst (celdas iniciales) y el
+ruido de fondo (últimas celdas), tal como pide la página, sin código
+adicional para seleccionarlo. Sólo atiende `channel::RX_0`: la página deja
+la selección de canal como config, y el contrato v1.2 no tiene campo para
+que el RCP la pida. Test de cableo
+(`ray::tests::spectrum_frame_places_tone_at_correct_bin_and_level`, mismo
+criterio de aceptación que el test de oráculo del crate): tono inyectado en
+tiempo rápido, igual en cada pulso, aparece en el bin y nivel correctos tras
+promediar. `cargo test --workspace` y `pytest contract/tests` limpios.
+
+**Lo que esto NO resuelve**: `center_freq_hz`/`span_hz` de `spectrum_frame`
+quedan en 0 — el contrato `DRx↔DSP` no expone frecuencia de muestreo ni
+sintonía del NCO, y la página del algoritmo deja ese mapeo fuera de
+`crates/spectrum-analyzer` por ser "mapeo de configuración, no un
+algoritmo"; no hay de dónde tomarlos en este repositorio todavía, ni
+siquiera con el contrato ya cerrado. `ref_level_dbm` usa
+`config.receiver_gain_db` sin la calibración fina adicional que menciona la
+página, que tampoco está modelada en este contrato. Sin promediado entre
+`request_spectrum` sucesivos: cada mandato dispara un periodograma sobre el
+radial vigente en ese instante, no una traza acumulada — el plan no pide
+más que eso hoy.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.

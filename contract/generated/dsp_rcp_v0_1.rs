@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.1 — lado DSP.
+// Contrato DSP↔RCP v1.2 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 1;
+pub const VERSION_MINOR: u8 = 2;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -551,6 +551,8 @@ pub mod command {
     pub const REQUEST_CAPABILITIES: u8 = 5;
     /// Pone a cero los contadores de telemetría.
     pub const RESET_COUNTERS: u8 = 6;
+    /// Pide una traza de espectro de FI (spectrum_frame) oportunista sobre el flujo vivo. Sin ráfaga en curso no hay traza que mandar.
+    pub const REQUEST_SPECTRUM: u8 = 7;
 }
 
 /// Modos de barrido.

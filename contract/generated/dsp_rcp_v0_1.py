@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v1.1 — lado RCP y
+Contrato DSP↔RCP v1.2 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 1
-VERSION_MINOR = 1
+VERSION_MINOR = 2
 
 @dataclass
 class Header:
@@ -436,6 +436,7 @@ class Command:
     REQUEST_CONFIG = 4
     REQUEST_CAPABILITIES = 5
     RESET_COUNTERS = 6
+    REQUEST_SPECTRUM = 7
 
 class SweepMode:
     """Modos de barrido."""

@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 1
+version_minor = 2
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -444,6 +444,7 @@ values = [
   { name = "request_config", value = 4, doc = "Pide de vuelta la configuración vigente." },
   { name = "request_capabilities", value = 5, doc = "Pide el mensaje de capacidades." },
   { name = "reset_counters", value = 6, doc = "Pone a cero los contadores de telemetría." },
+  { name = "request_spectrum", value = 7, doc = "Pide una traza de espectro de FI (spectrum_frame) oportunista sobre el flujo vivo. Sin ráfaga en curso no hay traza que mandar." },
 ]
 
 [[enum]]

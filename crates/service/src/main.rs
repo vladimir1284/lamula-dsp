@@ -5,7 +5,9 @@
 //! Este binario los conecta: escucha al DRx (AAL) y al RCP (control +
 //! datos), corre `lamula_rcp_link::Session` sobre los mensajes down, y
 //! cuando la sesión está en `running` ensambla cada radial y lo emite como
-//! `MomentRay`.
+//! `MomentRay`. El mandato `request_spectrum` responde con un `SpectrumFrame`
+//! (`crate::ray::build_spectrum_frame`, `lamula_spectrum_analyzer`) tomado
+//! oportunistamente del último radial ensamblado, sin modo dedicado.
 //!
 //! Tanto `lamula_ingest::tcp` como `lamula_rcp_link::tcp` reconectan solos:
 //! un cierre limpio de cualquiera de los dos lados vuelve a esperar la
@@ -50,6 +52,13 @@
 //!   (`lamula_burst::AfcLoop`) NO está conectado: exigiría mandar el mensaje
 //!   `Afc` (`nco_phase_inc`) de vuelta al DRx, y `lamula_ingest` sólo tiene
 //!   camino de lectura sobre esa conexión hoy, no de escritura.
+//! - `SpectrumFrame.center_freq_hz`/`span_hz` quedan a 0: el contrato
+//!   `DRx↔DSP` no expone frecuencia de muestreo ni sintonía del NCO, y la
+//!   página del algoritmo (`docs/algorithms/analizador-espectro-fi.md`) deja
+//!   ese mapeo fuera de `crates/spectrum-analyzer` — no hay de dónde
+//!   tomarlos en este repositorio todavía. Sólo se atiende el canal `RX_0`
+//!   (`crate::ray::build_spectrum_frame`): la selección de canal por
+//!   `request_spectrum` tampoco tiene campo en el contrato v1.2.
 //! - Censura por `sig_threshold`/`sqi_threshold`/`log_threshold`, y por
 //!   separado la de ZDR/ρHV/ΦDP/KDP: ver el doc-comment de `crate::ray`.
 //!   `ccor_threshold` no se aplica (no hay CCOR que evaluar). El desdoblado
@@ -138,6 +147,13 @@ async fn main() {
     let mut previous_prf: Option<ray::PreviousPrf> = None;
     let mut counters = Counters::default();
     let start = tokio::time::Instant::now();
+    // Radial crudo más reciente (sin corrección de fase de burst), para que
+    // `request_spectrum` tenga algo que muestrear sin esperar al próximo
+    // radial: captura oportunista sobre el flujo vivo
+    // (`docs/algorithms/analizador-espectro-fi.md` §"Cómo funciona"), no un
+    // modo dedicado.
+    let mut last_radial: Option<lamula_ingest::AssembledRadial> = None;
+    let mut spectrum_seq: u32 = 0;
 
     loop {
         tokio::select! {
@@ -169,6 +185,7 @@ async fn main() {
                         previous_prf = Some(next_previous_prf);
                         first_ray_after_config = false;
                         counters.rays_out += 1;
+                        last_radial = Some(radial);
                         if up.send(msg).await.is_err() {
                             println!("RCP no admite más momentos (up cerrado)");
                         }
@@ -195,6 +212,8 @@ async fn main() {
                     &mut previous_prf,
                     &counters,
                     start,
+                    &last_radial,
+                    &mut spectrum_seq,
                 )
                 .await;
             }
@@ -228,6 +247,8 @@ async fn handle_down_message(
     previous_prf: &mut Option<ray::PreviousPrf>,
     counters: &Counters,
     start: tokio::time::Instant,
+    last_radial: &Option<lamula_ingest::AssembledRadial>,
+    spectrum_seq: &mut u32,
 ) {
     match msg {
         DownMessage::Config(down_config) => {
@@ -280,6 +301,21 @@ async fn handle_down_message(
                 }
                 command::REQUEST_CAPABILITIES => {
                     let _ = up.send(UpMessage::Capabilities(capabilities())).await;
+                }
+                command::REQUEST_SPECTRUM => {
+                    // Oportunista sobre el último radial ensamblado: sin uno
+                    // (todavía no en marcha, o sin canal RX_0), no hay traza
+                    // que mandar — `ray::build_spectrum_frame` devuelve
+                    // `None` y este mandato queda sin efecto, mismo criterio
+                    // que un `request_status` antes de la primera ráfaga.
+                    if let (Some(radial), Some(cfg_snapshot)) = (last_radial, session.config()) {
+                        *spectrum_seq = spectrum_seq.wrapping_add(1);
+                        if let Some(msg) =
+                            ray::build_spectrum_frame(radial, cfg_snapshot, *spectrum_seq)
+                        {
+                            let _ = up.send(msg).await;
+                        }
+                    }
                 }
                 _ => {}
             }

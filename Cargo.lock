@@ -98,6 +98,7 @@ dependencies = [
  "lamula-rfi",
  "lamula-simulator",
  "lamula-spectral",
+ "lamula-spectrum-analyzer",
  "lamula-staggered-prt",
  "rand",
  "rand_distr",

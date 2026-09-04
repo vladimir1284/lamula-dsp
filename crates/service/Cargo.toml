@@ -26,6 +26,7 @@ lamula-burst = { path = "../burst" }
 lamula-attenuation = { path = "../attenuation" }
 lamula-clutter = { path = "../clutter" }
 lamula-spectral = { path = "../spectral" }
+lamula-spectrum-analyzer = { path = "../spectrum-analyzer" }
 lamula-rfi = { path = "../rfi" }
 rustfft = "6"
 tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }

@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.1 — lado MMI.
+// Contrato DSP↔RCP v1.2 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 1;
+export const VERSION_MINOR = 2;
 
 const LE = true;
 
@@ -1147,6 +1147,8 @@ export const Command = {
   REQUEST_CAPABILITIES: 5,
   /** Pone a cero los contadores de telemetría. */
   RESET_COUNTERS: 6,
+  /** Pide una traza de espectro de FI (spectrum_frame) oportunista sobre el flujo vivo. Sin ráfaga en curso no hay traza que mandar. */
+  REQUEST_SPECTRUM: 7,
 } as const;
 
 /**

@@ -158,7 +158,7 @@ use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
 use lamula_contract::drx_dsp::channel;
 use lamula_contract::dsp_rcp::{
     clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind,
-    polarization_mode, ray_flag, Config, MomentField, MomentRay,
+    polarization_mode, ray_flag, Config, MomentField, MomentRay, SpectrumFrame,
 };
 use lamula_dual_prf::{continuity_fix, dealias_dual_prf};
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
@@ -172,6 +172,7 @@ use lamula_quality::{sig_db, sqi};
 use lamula_rcp_link::wire::{MomentBlock, UpMessage};
 use lamula_rfi::{detect_rfi_mask, DEFAULT_RFI_MEDIAN_DB, DEFAULT_RFI_WIDTH_MAX_BINS};
 use lamula_spectral::{bin_velocity, hann_window, periodogram_hann, spectral_moments};
+use lamula_spectrum_analyzer::{hann_window as welch_hann_window, welch_trace_dbm};
 use lamula_staggered_prt::staggered_pulse_pair_velocities;
 use rustfft::num_complex::Complex64;
 use std::borrow::Cow;
@@ -588,6 +589,65 @@ fn burst_phase_correct(radial: &AssembledRadial, config: &Config) -> Option<Asse
         }
     }
     Some(corrected)
+}
+
+/// Traza de espectro de FI oportunista
+/// (`docs/algorithms/analizador-espectro-fi.md` §"Cómo funciona") sobre el
+/// mismo radial que ya trae el pipeline: para cada pulso, la serie de
+/// `n_bins` celdas de rango es tiempo rápido, no tiempo lento — al revés que
+/// `channels[c][bin]`, que es la serie pulso a pulso (dominio Doppler) que
+/// usa el resto de este módulo. Esa serie por pulso es la "captura" que
+/// [`welch_trace_dbm`] promedia; el tramo cubre a la vez el canal de burst
+/// (celdas iniciales) y el ruido de fondo (últimas celdas), tal como
+/// recomienda la página del algoritmo, sin modo dedicado ni interrumpir la
+/// adquisición.
+///
+/// Devuelve `None` si el radial no trae el canal `RX_0`, o si no tiene
+/// celdas o pulsos con que formar ni una sola captura — sin ráfaga en curso
+/// no hay traza que mandar (`crate::session`, mandato `request_spectrum`).
+///
+/// `center_freq_hz`/`span_hz` quedan a 0: el contrato `DRx↔DSP` no expone
+/// frecuencia de muestreo ni la sintonía del NCO, y la página del algoritmo
+/// deja esa conversión fuera de alcance de `crates/spectrum-analyzer` por
+/// ser "mapeo de configuración, no un algoritmo" — este repositorio no
+/// tiene de dónde tomarla todavía. `ref_level_dbm` usa
+/// `config.receiver_gain_db`, la única ganancia de receptor que conoce este
+/// contrato; la calibración fina adicional que menciona la página no está
+/// modelada aparte.
+pub fn build_spectrum_frame(
+    radial: &AssembledRadial,
+    config: &Config,
+    seq: u32,
+) -> Option<UpMessage> {
+    let idx = radial.channel_index(channel::RX_0)?;
+    let ch = &radial.channels[idx];
+    let n_bins = ch.len();
+    let n_pulses = ch.first().map_or(0, Vec::len);
+    if n_bins == 0 || n_pulses == 0 {
+        return None;
+    }
+
+    let captures: Vec<Vec<Complex64>> = (0..n_pulses)
+        .map(|p| (0..n_bins).map(|b| ch[b][p]).collect())
+        .collect();
+    let win = welch_hann_window(n_bins);
+    let bins_db = welch_trace_dbm(&captures, &win, config.receiver_gain_db as f64);
+
+    let frame = SpectrumFrame {
+        seq,
+        capture_time_utc_ns: radial.timestamp_ns_start,
+        n_bins: n_bins as u16,
+        channel: channel::RX_0,
+        flags: 0,
+        center_freq_hz: 0.0,
+        span_hz: 0.0,
+        ref_level_dbm: config.receiver_gain_db,
+        pad0: 0,
+    };
+    Some(UpMessage::SpectrumFrame {
+        frame,
+        bins_db: bins_db.into_iter().map(|v| v as f32).collect(),
+    })
 }
 
 pub fn build_moment_ray(
@@ -1541,6 +1601,67 @@ mod tests {
             ray_flags: vec![0; n_pulses],
             dropped_pulses: 0,
         }
+    }
+
+    #[test]
+    fn spectrum_frame_places_tone_at_correct_bin_and_level() {
+        // Mismo criterio de aceptación que
+        // `lamula_spectrum_analyzer::welch::tests::pure_tone_peak_at_correct_bin_and_level`,
+        // pero ejercitando el cableo de `crates/service`: el tono va en
+        // tiempo rápido (a través de las celdas), igual en cada pulso, así
+        // que promediar las `n_pulses` capturas de Welch no cambia el
+        // resultado de una sola.
+        let m = 64;
+        let bin_idx = 10;
+        let power_lin: f64 = 2.0;
+        let n_pulses = 4;
+        let tone: Vec<Complex64> = (0..m)
+            .map(|n| {
+                Complex64::from_polar(
+                    power_lin.sqrt(),
+                    2.0 * std::f64::consts::PI * bin_idx as f64 * n as f64 / m as f64,
+                )
+            })
+            .collect();
+        let channel: Vec<Vec<Complex64>> = tone.iter().map(|&s| vec![s; n_pulses]).collect();
+        let radial = radial_from_channels(vec![channel]);
+        let config = Config {
+            receiver_gain_db: 0.0,
+            ..config_with_thresholds(3.0, 0.4, -10.0)
+        };
+
+        let msg = build_spectrum_frame(&radial, &config, 7).expect("RX_0 con datos");
+        let UpMessage::SpectrumFrame { frame, bins_db } = msg else {
+            panic!("se esperaba SpectrumFrame");
+        };
+        let (seq, n_bins, chan) = (frame.seq, frame.n_bins, frame.channel);
+        assert_eq!(seq, 7);
+        assert_eq!(n_bins as usize, m);
+        assert_eq!(chan, channel::RX_0);
+
+        let (peak_bin, &peak_val) = bins_db
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap())
+            .unwrap();
+        assert_eq!(peak_bin, bin_idx);
+        let expected_dbm = 10.0 * power_lin.log10();
+        assert!(
+            (peak_val as f64 - expected_dbm).abs() < 0.01,
+            "peak_val={peak_val}"
+        );
+    }
+
+    #[test]
+    fn spectrum_frame_is_none_without_rx_0_channel() {
+        // `radial_from_channels` con un solo canal siempre lo marca `RX_0`
+        // (bit 1): un canal ausente no se puede modelar sin un segundo
+        // canal, así que se prueba con `channel_index` fallando sobre un
+        // radial cuyo único canal es `TX_BURST_0`.
+        let mut radial = radial_from_channels(vec![vec![vec![Complex64::new(1.0, 0.0)]]]);
+        radial.channel_mask = channel::TX_BURST_0;
+        let config = config_with_thresholds(3.0, 0.4, -10.0);
+        assert!(build_spectrum_frame(&radial, &config, 1).is_none());
     }
 
     const ALL_MOMENTS_MASK: u32 = (1 << moment_kind::UZ)
