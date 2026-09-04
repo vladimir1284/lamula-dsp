@@ -66,8 +66,8 @@ async fn frames_arrive_in_order_over_tcp() {
     // Sin una conexión nueva no debería llegar nada más; el canal no se
     // cierra (el adapter sigue esperando en `listener.accept()`), así que
     // se comprueba con un timeout en vez de esperar un `None`.
-    let extra = tokio::time::timeout(std::time::Duration::from_millis(200), source.frames.recv())
-        .await;
+    let extra =
+        tokio::time::timeout(std::time::Duration::from_millis(200), source.frames.recv()).await;
     assert!(
         extra.is_err(),
         "no debería haber más tramas sin una conexión nueva"
@@ -114,7 +114,11 @@ async fn reconnects_after_client_disconnects() {
 
     let mut client1 = TcpStream::connect(local_addr).await.unwrap();
     client1.write_all(&wire_frames[0]).await.unwrap();
-    let got1 = source.frames.recv().await.expect("falta la trama del primer cliente");
+    let got1 = source
+        .frames
+        .recv()
+        .await
+        .expect("falta la trama del primer cliente");
     assert_eq!(got1, decode_ray_frame(&wire_frames[0], FULL_SCALE).unwrap());
     drop(client1);
 
@@ -122,7 +126,11 @@ async fn reconnects_after_client_disconnects() {
     // cliente sin reiniciar el proceso.
     let mut client2 = TcpStream::connect(local_addr).await.unwrap();
     client2.write_all(&wire_frames[0]).await.unwrap();
-    let got2 = source.frames.recv().await.expect("falta la trama del segundo cliente");
+    let got2 = source
+        .frames
+        .recv()
+        .await
+        .expect("falta la trama del segundo cliente");
     assert_eq!(got2, decode_ray_frame(&wire_frames[0], FULL_SCALE).unwrap());
 
     source.task.abort();

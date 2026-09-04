@@ -65,7 +65,10 @@ impl AssembledRadial {
     /// Sólo tiene sentido con polarización alternante H/V. En canal único o
     /// simultánea (STAR) el bit vale 0 en todos los pulsos del `DRx↔DSP` v0.2,
     /// así que la subserie V sale vacía.
-    pub fn split_by_tx_polarization(&self, series: &[Complex64]) -> (Vec<Complex64>, Vec<Complex64>) {
+    pub fn split_by_tx_polarization(
+        &self,
+        series: &[Complex64],
+    ) -> (Vec<Complex64>, Vec<Complex64>) {
         assert_eq!(
             series.len(),
             self.ray_flags.len(),
@@ -107,7 +110,12 @@ impl AssembledRadial {
     /// resto del canal es ruido/silencio (`drx_dsp::channel`, doc del enum).
     /// `None` si el canal no está presente, si `window_bins` es 0, o si el
     /// radial no tiene bins suficientes.
-    pub fn burst_window(&self, bit: u8, pulse_idx: usize, window_bins: usize) -> Option<Vec<Complex64>> {
+    pub fn burst_window(
+        &self,
+        bit: u8,
+        pulse_idx: usize,
+        window_bins: usize,
+    ) -> Option<Vec<Complex64>> {
         if window_bins == 0 {
             return None;
         }
@@ -116,7 +124,11 @@ impl AssembledRadial {
         if bins == 0 {
             return None;
         }
-        Some((0..bins).map(|bin| self.channels[c][bin][pulse_idx]).collect())
+        Some(
+            (0..bins)
+                .map(|bin| self.channels[c][bin][pulse_idx])
+                .collect(),
+        )
     }
 }
 
@@ -308,7 +320,10 @@ mod tests {
             .unwrap()
             .expect("3 pulsos juntados");
 
-        assert_eq!(radial.ray_flags, vec![ray_flag::TX_POL_V, 0, ray_flag::AZEL_INVALID]);
+        assert_eq!(
+            radial.ray_flags,
+            vec![ray_flag::TX_POL_V, 0, ray_flag::AZEL_INVALID]
+        );
     }
 
     #[test]
@@ -350,7 +365,13 @@ mod tests {
     /// Trama con `n_channels` canales de `n_bins` bins cada uno; la muestra
     /// del canal `c`, bin `b` vale `value + 100.0*c as f64 + 10.0*b as f64`,
     /// para poder identificar en los asserts de qué canal/bin salió.
-    fn multi_channel_frame(seq: u32, channel_mask: u8, n_channels: usize, n_bins: usize, value: f64) -> RawPulseFrame {
+    fn multi_channel_frame(
+        seq: u32,
+        channel_mask: u8,
+        n_channels: usize,
+        n_bins: usize,
+        value: f64,
+    ) -> RawPulseFrame {
         let channels = (0..n_channels)
             .map(|c| {
                 (0..n_bins)
@@ -381,7 +402,9 @@ mod tests {
         // no el valor del bit.
         let mask = 0b0001_0001;
         let mut assembler = RadialAssembler::new(2);
-        assembler.feed(multi_channel_frame(0, mask, 2, 1, 1.0)).unwrap();
+        assembler
+            .feed(multi_channel_frame(0, mask, 2, 1, 1.0))
+            .unwrap();
         let radial = assembler
             .feed(multi_channel_frame(1, mask, 2, 1, 2.0))
             .unwrap()
@@ -398,7 +421,9 @@ mod tests {
         // bins del canal de burst son ventana real (`window_bins = 2`).
         let mask = 0b0001_0001;
         let mut assembler = RadialAssembler::new(2);
-        assembler.feed(multi_channel_frame(0, mask, 2, 3, 1.0)).unwrap();
+        assembler
+            .feed(multi_channel_frame(0, mask, 2, 3, 1.0))
+            .unwrap();
         let radial = assembler
             .feed(multi_channel_frame(1, mask, 2, 3, 2.0))
             .unwrap()
@@ -406,8 +431,13 @@ mod tests {
 
         // Canal 1 (TX_BURST_0), pulso 1 (value base 2.0): bin0=102.0,
         // bin1=112.0, bin2=122.0 — la ventana de 2 bins corta antes de bin2.
-        let window = radial.burst_window(16, 1, 2).expect("canal de burst presente");
-        assert_eq!(window, vec![Complex64::new(102.0, 0.0), Complex64::new(112.0, 0.0)]);
+        let window = radial
+            .burst_window(16, 1, 2)
+            .expect("canal de burst presente");
+        assert_eq!(
+            window,
+            vec![Complex64::new(102.0, 0.0), Complex64::new(112.0, 0.0)]
+        );
     }
 
     #[test]

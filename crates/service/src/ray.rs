@@ -684,9 +684,7 @@ pub fn build_moment_ray(
     let dual_prf_role: Option<bool> = if config.dealias_mode == dealias_mode::DUAL_PRF {
         match previous_prf {
             // `true` = este radial es el de PRF baja (mayor `prf_div`).
-            Some(prev) if prev.prf_div != radial.prf_div => {
-                Some(radial.prf_div > prev.prf_div)
-            }
+            Some(prev) if prev.prf_div != radial.prf_div => Some(radial.prf_div > prev.prf_div),
             _ => {
                 dealias_failed = true;
                 None
@@ -734,7 +732,11 @@ pub fn build_moment_ray(
             }
         })
         .collect();
-    let own_prt_for_main = if alternating { own_prt_s * 2.0 } else { own_prt_s };
+    let own_prt_for_main = if alternating {
+        own_prt_s * 2.0
+    } else {
+        own_prt_s
+    };
 
     // UZ/V/SQI/SIG sólo corren sobre el canal 0 — H, por convención del
     // contrato (en modo alternante, su subserie copolar `main_channel`, ver
@@ -797,10 +799,8 @@ pub fn build_moment_ray(
     // (`dual_prf_role` es `None` fuera de `DUAL_PRF`), una aproximación no
     // contrastada contra ningún oráculo para esa combinación.
     let rfi_filter_enabled = config.rfi_filter != 0;
-    let clutter_results: Option<Vec<ClutterResult>> = (config.clutter_filter
-        != clutter_filter::NONE
-        || rfi_filter_enabled)
-        .then(|| {
+    let clutter_results: Option<Vec<ClutterResult>> =
+        (config.clutter_filter != clutter_filter::NONE || rfi_filter_enabled).then(|| {
             main_channel
                 .iter()
                 .zip(estimates.iter())
@@ -845,45 +845,49 @@ pub fn build_moment_ray(
         staggered_velocity_mps(radial, config)
     } else {
         match (dual_prf_role, previous_prf) {
-        (Some(is_low), Some(prev)) if prev.velocity_mps.len() == raw_velocity_mps.len() => {
-            let (prt_low, prt_high, v_a1, v_a2, v_ext) = dual_prf_split(config);
-            // El rol de `prev` es el opuesto del de este radial (si no,
-            // `prev.prf_div == radial.prf_div` y no se habría llegado aquí
-            // — ver `dual_prf_role`). Se reescala su velocidad guardada al
-            // PRT correcto de SU rol antes de usarla: puede haberse
-            // calculado con `mean_prt_s` si `prev` fue a su vez un radial
-            // aislado (ver el doc-comment de `PreviousPrf`).
-            let prev_correct_prt_s = if is_low { prt_high } else { prt_low };
-            let prev_velocity_rescaled: Vec<f64> = prev
-                .velocity_mps
-                .iter()
-                .map(|&v| v as f64 * (prev.own_prt_s / prev_correct_prt_s))
-                .collect();
-            let v_hats: Vec<f64> = if is_low {
-                raw_velocity_mps
+            (Some(is_low), Some(prev)) if prev.velocity_mps.len() == raw_velocity_mps.len() => {
+                let (prt_low, prt_high, v_a1, v_a2, v_ext) = dual_prf_split(config);
+                // El rol de `prev` es el opuesto del de este radial (si no,
+                // `prev.prf_div == radial.prf_div` y no se habría llegado aquí
+                // — ver `dual_prf_role`). Se reescala su velocidad guardada al
+                // PRT correcto de SU rol antes de usarla: puede haberse
+                // calculado con `mean_prt_s` si `prev` fue a su vez un radial
+                // aislado (ver el doc-comment de `PreviousPrf`).
+                let prev_correct_prt_s = if is_low { prt_high } else { prt_low };
+                let prev_velocity_rescaled: Vec<f64> = prev
+                    .velocity_mps
                     .iter()
-                    .zip(&prev_velocity_rescaled)
-                    .map(|(&v1, &v2)| dealias_dual_prf(v1 as f64, v2, v_a1, v_a2, v_ext).velocity_mps)
+                    .map(|&v| v as f64 * (prev.own_prt_s / prev_correct_prt_s))
+                    .collect();
+                let v_hats: Vec<f64> = if is_low {
+                    raw_velocity_mps
+                        .iter()
+                        .zip(&prev_velocity_rescaled)
+                        .map(|(&v1, &v2)| {
+                            dealias_dual_prf(v1 as f64, v2, v_a1, v_a2, v_ext).velocity_mps
+                        })
+                        .collect()
+                } else {
+                    prev_velocity_rescaled
+                        .iter()
+                        .zip(&raw_velocity_mps)
+                        .map(|(&v1, &v2)| {
+                            dealias_dual_prf(v1, v2 as f64, v_a1, v_a2, v_ext).velocity_mps
+                        })
+                        .collect()
+                };
+                continuity_fix(&v_hats, v_a1, DUAL_PRF_MAX_FOLD_SEARCH)
+                    .into_iter()
+                    .map(|v| v as f32)
                     .collect()
-            } else {
-                prev_velocity_rescaled
-                    .iter()
-                    .zip(&raw_velocity_mps)
-                    .map(|(&v1, &v2)| dealias_dual_prf(v1, v2 as f64, v_a1, v_a2, v_ext).velocity_mps)
-                    .collect()
-            };
-            continuity_fix(&v_hats, v_a1, DUAL_PRF_MAX_FOLD_SEARCH)
-                .into_iter()
-                .map(|v| v as f32)
-                .collect()
-        }
-        (Some(_), Some(_)) => {
-            // Rol conocido pero número de celdas distinto del radial
-            // anterior: no se puede emparejar celda a celda.
-            dealias_failed = true;
-            raw_velocity_mps.clone()
-        }
-        _ => raw_velocity_mps.clone(),
+            }
+            (Some(_), Some(_)) => {
+                // Rol conocido pero número de celdas distinto del radial
+                // anterior: no se puede emparejar celda a celda.
+                dealias_failed = true;
+                raw_velocity_mps.clone()
+            }
+            _ => raw_velocity_mps.clone(),
         }
     };
 
@@ -1033,109 +1037,104 @@ pub fn build_moment_ray(
     // Sólo hay ρHV/ZDR/ΦDP/KDP (y, en modo alternante, LDR) con un segundo
     // canal (V) presente en el radial — `channel_mask`/`channels.len()` lo
     // refleja tal cual llega del DRx.
-    let polarimetric: Option<PolarimetricValues> = (radial.channels.len() > 1)
-        .then(|| {
-            let mut zdr = Vec::with_capacity(n_gates as usize);
-            let mut rhohv = Vec::with_capacity(n_gates as usize);
-            let mut phidp = Vec::with_capacity(n_gates as usize);
-            let mut ldr: Vec<f32> = Vec::with_capacity(n_gates as usize);
-            for (i, (h, v)) in radial.channels[0]
-                .iter()
-                .zip(radial.channels[1].iter())
-                .enumerate()
-            {
-                let est = if alternating {
-                    // `hh` es exactamente `main_channel[i]` — la misma
-                    // subserie copolar H que ya alimentó el pulse-pair
-                    // principal más arriba, no una segunda llamada a
-                    // `split_by_tx_polarization` con su propio recorte.
-                    // `vh` (cruzada, tx=H) y `vv` (copolar V, tx=V) salen de
-                    // partir `channels[1]` por la misma paridad.
-                    let hh = main_channel[i].as_ref();
-                    let (vh, vv) = radial.split_by_tx_polarization(v);
-                    // `sigma_v_mps`: ancho espectral ya estimado por el
-                    // pulse-pair principal sobre esta misma celda —
-                    // exactamente el hueco que el ítem (4) de
-                    // `docs/algorithms/roadmap.md` §"Decisiones cerradas"
-                    // dejaba pendiente. `0.0` cuando el pulse-pair no lo
-                    // definió (`Censored`): sin ensanchamiento espectral
-                    // documentado que asumir en ese caso, mismo criterio de
-                    // "no inventar" que el resto del módulo.
-                    let sigma_v_mps = estimates[i].spectrum_width_mps.unwrap_or(0.0);
-                    let est = polarimetric_moments_alternating(
-                        hh,
-                        &vv,
-                        config.zdr_offset_db as f64,
-                        config.phidp_offset_deg as f64,
-                        sigma_v_mps,
-                        wavelength_m,
-                        own_prt_s,
-                        MIN_SNR_LIN_POLARIMETRIC,
-                    );
-                    // LDR censurado a NaN si la celda ya está censurada por
-                    // SNR (mismo criterio que ZDR/ρHV/ΦDP) o si cae por
-                    // debajo del margen de aislamiento de antena
-                    // (`LdrEstimate::reliable`) — publicarlo sin fiabilidad
-                    // es "engañoso", como dice la página del algoritmo.
-                    let ldr_est = ldr_db(hh, &vh, config.antenna_isolation_db as f64);
-                    ldr.push(
-                        if est.flag == PolarimetricFlag::Ok && ldr_est.reliable {
-                            ldr_est.ldr_db as f32
-                        } else {
-                            f32::NAN
-                        },
-                    );
-                    est
+    let polarimetric: Option<PolarimetricValues> = (radial.channels.len() > 1).then(|| {
+        let mut zdr = Vec::with_capacity(n_gates as usize);
+        let mut rhohv = Vec::with_capacity(n_gates as usize);
+        let mut phidp = Vec::with_capacity(n_gates as usize);
+        let mut ldr: Vec<f32> = Vec::with_capacity(n_gates as usize);
+        for (i, (h, v)) in radial.channels[0]
+            .iter()
+            .zip(radial.channels[1].iter())
+            .enumerate()
+        {
+            let est = if alternating {
+                // `hh` es exactamente `main_channel[i]` — la misma
+                // subserie copolar H que ya alimentó el pulse-pair
+                // principal más arriba, no una segunda llamada a
+                // `split_by_tx_polarization` con su propio recorte.
+                // `vh` (cruzada, tx=H) y `vv` (copolar V, tx=V) salen de
+                // partir `channels[1]` por la misma paridad.
+                let hh = main_channel[i].as_ref();
+                let (vh, vv) = radial.split_by_tx_polarization(v);
+                // `sigma_v_mps`: ancho espectral ya estimado por el
+                // pulse-pair principal sobre esta misma celda —
+                // exactamente el hueco que el ítem (4) de
+                // `docs/algorithms/roadmap.md` §"Decisiones cerradas"
+                // dejaba pendiente. `0.0` cuando el pulse-pair no lo
+                // definió (`Censored`): sin ensanchamiento espectral
+                // documentado que asumir en ese caso, mismo criterio de
+                // "no inventar" que el resto del módulo.
+                let sigma_v_mps = estimates[i].spectrum_width_mps.unwrap_or(0.0);
+                let est = polarimetric_moments_alternating(
+                    hh,
+                    &vv,
+                    config.zdr_offset_db as f64,
+                    config.phidp_offset_deg as f64,
+                    sigma_v_mps,
+                    wavelength_m,
+                    own_prt_s,
+                    MIN_SNR_LIN_POLARIMETRIC,
+                );
+                // LDR censurado a NaN si la celda ya está censurada por
+                // SNR (mismo criterio que ZDR/ρHV/ΦDP) o si cae por
+                // debajo del margen de aislamiento de antena
+                // (`LdrEstimate::reliable`) — publicarlo sin fiabilidad
+                // es "engañoso", como dice la página del algoritmo.
+                let ldr_est = ldr_db(hh, &vh, config.antenna_isolation_db as f64);
+                ldr.push(if est.flag == PolarimetricFlag::Ok && ldr_est.reliable {
+                    ldr_est.ldr_db as f32
                 } else {
-                    polarimetric_moments_simultaneous(
-                        h,
-                        v,
-                        config.zdr_offset_db as f64,
-                        config.phidp_offset_deg as f64,
-                        MIN_SNR_LIN_POLARIMETRIC,
-                    )
-                };
-                let (z, r, p) = match est.flag {
-                    PolarimetricFlag::Ok => {
-                        (est.zdr_db as f32, est.rhohv as f32, est.phidp_deg as f32)
-                    }
-                    PolarimetricFlag::Censored => (f32::NAN, f32::NAN, f32::NAN),
-                };
-                zdr.push(z);
-                rhohv.push(r);
-                phidp.push(p);
-            }
+                    f32::NAN
+                });
+                est
+            } else {
+                polarimetric_moments_simultaneous(
+                    h,
+                    v,
+                    config.zdr_offset_db as f64,
+                    config.phidp_offset_deg as f64,
+                    MIN_SNR_LIN_POLARIMETRIC,
+                )
+            };
+            let (z, r, p) = match est.flag {
+                PolarimetricFlag::Ok => (est.zdr_db as f32, est.rhohv as f32, est.phidp_deg as f32),
+                PolarimetricFlag::Censored => (f32::NAN, f32::NAN, f32::NAN),
+            };
+            zdr.push(z);
+            rhohv.push(r);
+            phidp.push(p);
+        }
 
-            // KDP: censura adicional por ρHV bajo, luego desdoblado y ajuste
-            // de ventana sobre el ΦDP resultante — ver el doc-comment del
-            // módulo para las dos constantes sin campo propio en `Config`.
-            let phidp_for_kdp: Vec<f64> = phidp
-                .iter()
-                .zip(&rhohv)
-                .map(|(&p, &r)| {
-                    if r.is_nan() || (r as f64) < RHOHV_THRESHOLD_KDP {
-                        f64::NAN
-                    } else {
-                        p as f64
-                    }
-                })
-                .collect();
-            let phidp_unwrapped = unwrap_deg(&phidp_for_kdp);
-            let gate_spacing_km = config.gate_spacing_m as f64 / 1000.0;
-            let kdp: Vec<f32> = kdp_window_fit(&phidp_unwrapped, gate_spacing_km, KDP_WINDOW_GATES)
-                .into_iter()
-                .map(|k| k.map(|v| v as f32).unwrap_or(f32::NAN))
-                .collect();
+        // KDP: censura adicional por ρHV bajo, luego desdoblado y ajuste
+        // de ventana sobre el ΦDP resultante — ver el doc-comment del
+        // módulo para las dos constantes sin campo propio en `Config`.
+        let phidp_for_kdp: Vec<f64> = phidp
+            .iter()
+            .zip(&rhohv)
+            .map(|(&p, &r)| {
+                if r.is_nan() || (r as f64) < RHOHV_THRESHOLD_KDP {
+                    f64::NAN
+                } else {
+                    p as f64
+                }
+            })
+            .collect();
+        let phidp_unwrapped = unwrap_deg(&phidp_for_kdp);
+        let gate_spacing_km = config.gate_spacing_m as f64 / 1000.0;
+        let kdp: Vec<f32> = kdp_window_fit(&phidp_unwrapped, gate_spacing_km, KDP_WINDOW_GATES)
+            .into_iter()
+            .map(|k| k.map(|v| v as f32).unwrap_or(f32::NAN))
+            .collect();
 
-            (
-                zdr,
-                rhohv,
-                phidp,
-                kdp,
-                phidp_unwrapped,
-                alternating.then_some(ldr),
-            )
-        });
+        (
+            zdr,
+            rhohv,
+            phidp,
+            kdp,
+            phidp_unwrapped,
+            alternating.then_some(ldr),
+        )
+    });
 
     // Corrección de atenuación Z-PHI sobre CZ (Testud et al. 2000, ver
     // `lamula_attenuation`) — el alcance nuevo que `docs/algorithms/
@@ -1582,10 +1581,7 @@ mod tests {
     }
 
     fn radial_from_channels(channels: Vec<Vec<Vec<Complex64>>>) -> AssembledRadial {
-        let n_pulses = channels
-            .first()
-            .and_then(|c| c.first())
-            .map_or(0, Vec::len);
+        let n_pulses = channels.first().and_then(|c| c.first()).map_or(0, Vec::len);
         AssembledRadial {
             seq_start: 1,
             timestamp_ns_start: 0,
@@ -1791,8 +1787,15 @@ mod tests {
 
         let (alt_msg, _) =
             build_moment_ray(&radial, &alternating_config, 1, false, 1_000_000, 0.0, None);
-        let (naive_msg, _) =
-            build_moment_ray(&radial, &simultaneous_config, 1, false, 1_000_000, 0.0, None);
+        let (naive_msg, _) = build_moment_ray(
+            &radial,
+            &simultaneous_config,
+            1,
+            false,
+            1_000_000,
+            0.0,
+            None,
+        );
 
         fn zdr_of(msg: &UpMessage) -> f32 {
             let UpMessage::MomentRay { moments, .. } = msg else {
@@ -2220,7 +2223,8 @@ mod tests {
         let mut radial = radial_from_channels(vec![vec![h]]);
         radial.prf_div = 3; // mayor divisor = PRF baja
 
-        let (msg, _) = build_moment_ray(&radial, &dual_prf_config(), 1, false, 1_000_000, 0.0, None);
+        let (msg, _) =
+            build_moment_ray(&radial, &dual_prf_config(), 1, false, 1_000_000, 0.0, None);
         let UpMessage::MomentRay { ray, .. } = msg else {
             panic!("se esperaba MomentRay");
         };
@@ -2263,8 +2267,7 @@ mod tests {
         let mut radial2 = radial_from_channels(vec![vec![h2]]);
         radial2.prf_div = 2; // menor divisor = PRF alta
 
-        let (_, previous_prf) =
-            build_moment_ray(&radial1, &config, 1, false, 1_000_000, 0.0, None);
+        let (_, previous_prf) = build_moment_ray(&radial1, &config, 1, false, 1_000_000, 0.0, None);
         let (msg2, _) = build_moment_ray(
             &radial2,
             &config,
@@ -2336,12 +2339,30 @@ mod tests {
         // idx4=eco (trip2 de la celda 1); idx5=ruido (sin trip2 para la
         // celda 2).
         let low_cells = [
-            CellParams { prt_s: 1.2e-3, ..echo },
-            CellParams { prt_s: 1.2e-3, ..noise },
-            CellParams { prt_s: 1.2e-3, ..noise },
-            CellParams { prt_s: 1.2e-3, ..noise },
-            CellParams { prt_s: 1.2e-3, ..echo },
-            CellParams { prt_s: 1.2e-3, ..noise },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
         ];
         let low_channel = generate_channel(&low_cells, &mut rng);
         let mut radial_low = radial_from_channels(vec![low_channel]);
@@ -2351,10 +2372,22 @@ mod tests {
         // propio; celda 3 sin eco (control: no debe evaluarse pese a no
         // tener referencia).
         let high_cells = [
-            CellParams { prt_s: 0.8e-3, ..echo },
-            CellParams { prt_s: 0.8e-3, ..echo },
-            CellParams { prt_s: 0.8e-3, ..echo },
-            CellParams { prt_s: 0.8e-3, ..noise },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..noise
+            },
         ];
         let high_channel = generate_channel(&high_cells, &mut rng);
         let mut radial_high = radial_from_channels(vec![high_channel]);
@@ -2533,7 +2566,8 @@ mod tests {
         );
         // A 10 km, `20·log10(10) ≈ 20.0 dB` por encima de UZ (más
         // `radar_constant_db`, que UZ nunca aplica).
-        let expected = uz.values[0] as f64 + 20.0 * 10.0f64.log10() + config.radar_constant_db as f64;
+        let expected =
+            uz.values[0] as f64 + 20.0 * 10.0f64.log10() + config.radar_constant_db as f64;
         assert!(
             (cz.values[0] as f64 - expected).abs() < 1e-3,
             "CZ ({}) debería coincidir con la ecuación del radar aplicada a UZ ({}): esperado {expected}",
@@ -2582,7 +2616,10 @@ mod tests {
             cz.values[0].is_nan(),
             "CZ a rango 0 no tiene ecuación del radar válida, aunque la celda no esté censurada"
         );
-        assert_eq!(cz.field.flags & moment_flag::HAS_MISSING, moment_flag::HAS_MISSING);
+        assert_eq!(
+            cz.field.flags & moment_flag::HAS_MISSING,
+            moment_flag::HAS_MISSING
+        );
     }
 
     use lamula_simulator::gaussian_doppler_spectrum;
@@ -2613,7 +2650,8 @@ mod tests {
         m: usize,
         rng: &mut impl rand::Rng,
     ) -> Vec<Complex64> {
-        let weather = gaussian_doppler_spectrum(power_weather, mean_v, sigma_v, wavelength_m, prt_s, m);
+        let weather =
+            gaussian_doppler_spectrum(power_weather, mean_v, sigma_v, wavelength_m, prt_s, m);
         let clutter = gaussian_doppler_spectrum(power_clutter, 0.0, 1e-6, wavelength_m, prt_s, m);
         let shaped: Vec<Complex64> = weather
             .iter()
@@ -2666,8 +2704,8 @@ mod tests {
 
         let mut rng = StdRng::seed_from_u64(20260902);
         let h = generate_cell_with_clutter(
-            1.0,   // meteoro
-            0.0,   // superpuesto al clutter, el caso que GMAP tiene que resolver
+            1.0, // meteoro
+            0.0, // superpuesto al clutter, el caso que GMAP tiene que resolver
             1.5,
             100.0, // clutter 20 dB más fuerte
             0.01,
@@ -3024,8 +3062,14 @@ mod tests {
         let se_uz = value_of(&se_moments, moment_kind::UZ);
         let se_v = value_of(&se_moments, moment_kind::V);
 
-        assert!(pp_uz.is_finite() && pp_v.is_finite(), "pulse-pair no debería censurar un tono puro");
-        assert!(se_uz.is_finite() && se_v.is_finite(), "el modo espectral no debería censurar un tono puro");
+        assert!(
+            pp_uz.is_finite() && pp_v.is_finite(),
+            "pulse-pair no debería censurar un tono puro"
+        );
+        assert!(
+            se_uz.is_finite() && se_v.is_finite(),
+            "el modo espectral no debería censurar un tono puro"
+        );
 
         assert!(
             (se_v as f64 - se_v_truth).abs() < 1e-4,
