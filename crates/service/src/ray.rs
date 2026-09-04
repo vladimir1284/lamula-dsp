@@ -1117,12 +1117,20 @@ pub fn build_moment_ray(
                 // documentado que asumir en ese caso, mismo criterio de
                 // "no inventar" que el resto del módulo.
                 let sigma_v_mps = estimates[i].spectrum_width_mps.unwrap_or(0.0);
+                // `velocity_mps`: corrige el término de fase Doppler que el
+                // propio retardo medio-PRT (`own_prt_s`) introduce en
+                // `arg(R_hv)` (ver `docs/algorithms/roadmap.md` §"Decisiones
+                // cerradas", "ΦDP en modo alternante"). Mismo origen y
+                // mismo criterio de "no re-estimar aquí" que `sigma_v_mps`:
+                // el pulse-pair principal ya la calculó sobre esta celda.
+                let velocity_mps = estimates[i].velocity_mps;
                 let est = polarimetric_moments_alternating(
                     hh,
                     &vv,
                     config.zdr_offset_db as f64,
                     config.phidp_offset_deg as f64,
                     sigma_v_mps,
+                    velocity_mps,
                     wavelength_m,
                     own_prt_s,
                     MIN_SNR_LIN_POLARIMETRIC,

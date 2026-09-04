@@ -148,9 +148,10 @@ gaussiana de `crates/clutter`). Con esto queda completa la fase 2 del plan
 de trabajo en los pasos 2 y 3 del método. En fase 3, están hechos el paso 2
 y el paso 3 para
 [covarianzas polarimétricas](polarimetria-covarianzas.md)
-(`crates/polarimetry`: ZDR/ρHV/ΦDP en modo simultáneo, ρHV corregido por
-decorrelación de retardo medio-PRT en modo alternante, LDR con saturación
-por aislamiento de antena) y para [KDP](kdp-estimacion.md) (`crates/kdp`:
+(`crates/polarimetry`: ZDR/ρHV/ΦDP en modo simultáneo; en modo alternante,
+ρHV corregido por decorrelación de retardo medio-PRT y ΦDP corregido por el
+término de fase Doppler de ese mismo retardo; LDR con saturación por
+aislamiento de antena) y para [KDP](kdp-estimacion.md) (`crates/kdp`:
 desdoblado de ΦDP y ventana deslizante de mínimos cuadrados, Ryzhkov & Zrnić
 1996) y para
 [calibración polarimétrica](calibracion-polarimetrica.md)
@@ -329,9 +330,43 @@ sin pánico. Tampoco está contrastada la combinación alternante +
 por el mismo `main_channel`/`own_prt_for_main` por consistencia (evitar la
 misma contaminación de (2) en cualquier otro consumidor de "el canal 0 tal
 cual"), pero ningún oráculo de este repositorio cubre esa interacción
-todavía. La corrección de ΦDP en modo alternante por el término de fase
-Doppler del retardo medio-PRT sigue pendiente, tal como ya señalaba el
-oráculo de `crates/polarimetry` antes de este cableo — no es un hueco nuevo.
+todavía.
+
+**ΦDP en modo alternante, término de fase Doppler del retardo medio-PRT —
+cerrado, fórmula.** El hueco que el propio oráculo de `crates/polarimetry`
+señalaba desde antes del cableo de (1)-(4) arriba: `arg(R_hv)` a retardo
+medio-PRT `T` no es sólo `ΦDP_verdadero`, acarrea además la fase de Doppler de
+la autocorrelación temporal del blanco a ese retardo —misma forma que la fase
+de `R(1)` en pulse-pair, `θ_doppler = -4π·v·T/λ`, evaluada a `T` (medio PRT)
+en vez del PRT completo—. Derivado del modelo de covarianza temporal ya
+validado en la celda "Modo alternante" del oráculo (`temporal_covariance`
+tenía la fase desde el principio; lo que faltaba era una celda que
+contrastara ΦDP, no sólo ρHV, contra ella): con `h[i]` la muestra anterior en
+el tiempo y `v[i]` la posterior (mismo orden que `generate_alternating_dualpol`
+genera y que `crates/service::ray` ya cablea), `arg(E[h·conj(v)]) =
+ΦDP_verdadero + θ_doppler`, así que `ΦDP_verdadero = arg(R_hv) − θ_doppler −
+phidp_offset_deg`. `polarimetric_moments_alternating`
+(`crates/polarimetry/src/covariance.rs`) gana un parámetro nuevo,
+`velocity_mps` — la velocidad radial media ya estimada para la celda, mismo
+origen y mismo criterio de "no re-estimar aquí" que `sigma_v_mps`
+(pulse-pair sobre el canal H a su propio PRT) —, y resta `θ_doppler` de
+`arg(R_hv)` antes de envolver a `(-180, 180]`. Cableado en
+`crates/service::ray`: la llamada ya tenía `sigma_v_mps =
+estimates[i].spectrum_width_mps`, ahora también pasa `estimates[i]
+.velocity_mps` — el mismo `PulsePairEstimate` de esa celda, ningún cómputo
+nuevo. Contraste numérico nuevo en
+`crates/polarimetry/tests/against_oracle.rs`
+(`alternating_phidp_corrected_matches_truth_naive_is_biased`): compara el
+sesgo de ΦDP corregido (`velocity_mps=MEAN_V`, dentro de `BIAS_TOL_PHIDP`)
+contra el mismo estimador sin corregir (`velocity_mps=0.0`, sesgo de
+~36° a los parámetros del oráculo, muy por encima de la tolerancia) —
+confirma que el efecto es real, no un artefacto de muestra finita, mismo
+criterio que la comparación análoga de ρHV. Oráculo actualizado con las
+celdas correspondientes antes del cambio Rust, como pide el método —
+ejecutado (`jupyter nbconvert --execute`, venv del repo) con sus 13
+comprobaciones en verde, las dos nuevas de ΦDP incluidas. `cargo build`/
+`cargo test --workspace`/`cargo clippy -- -D warnings`/`cargo fmt --check`
+en verde.
 
 **Nota aparte, no cerrada por este cambio**: el enum `polarization_mode` del
 esquema (`contract/schema/dsp_rcp_v0_1.toml`) describe `alternating` como

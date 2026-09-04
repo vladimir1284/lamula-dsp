@@ -1,6 +1,6 @@
 # Variables polarimétricas: ZDR, ρHV, ΦDP y LDR
 
-> **Oráculo en Python**: [`tools/oracles/polarimetria_covarianzas.ipynb`](../../tools/oracles/polarimetria_covarianzas.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/polarimetry`: ZDR/ρHV/ΦDP en modo simultáneo, ρHV corregido por decorrelación de retardo medio-PRT en modo alternante (Sachidananda & Zrnić 1989) y LDR con saturación por aislamiento de antena, contrastada numéricamente contra el oráculo en `crates/polarimetry/tests/against_oracle.rs`. La corrección de ΦDP en modo alternante por el término de fase Doppler del retardo medio-PRT queda pendiente — el oráculo no la valida todavía.
+> **Oráculo en Python**: [`tools/oracles/polarimetria_covarianzas.ipynb`](../../tools/oracles/polarimetria_covarianzas.ipynb) — derivado del paper, no de ningún código Rust (ver `roadmap.md` §"Método de estudio"). Implementación Rust en `crates/polarimetry`: ZDR/ρHV/ΦDP en modo simultáneo; en modo alternante (Sachidananda & Zrnić 1989), ρHV corregido por decorrelación de retardo medio-PRT y ΦDP corregido por el término de fase Doppler que ese mismo retardo introduce en `arg(R_hv)`; y LDR con saturación por aislamiento de antena — todo contrastado numéricamente contra el oráculo en `crates/polarimetry/tests/against_oracle.rs`.
 
 ## Qué resuelve
 
@@ -73,11 +73,20 @@ polarización y se reciben copolar y cruzada. Hay LDR y no hay acoplamiento
 cruzado, pero la PRF efectiva por canal es la mitad, y con ella la velocidad de
 Nyquist. Además, las muestras de los dos canales ya no son simultáneas: la
 covarianza cruzada se estima a retardo medio-PRT en vez de a retardo cero, lo
-que introduce un factor de decorrelación que **hay que corregir** —depende del
-ancho espectral— o ρHV sale sistemáticamente bajo y ΦDP sesgado. Sachidananda &
-Zrnić (1989) dan el estimador correcto para este modo, y es un estimador
-distinto, no el mismo con otros índices. Implementarlo como si fuera el mismo es
-el error clásico de este modo.
+que introduce dos sesgos que **hay que corregir**, ninguno de los dos con la
+fórmula directa del modo simultáneo. Sachidananda & Zrnić (1989) dan el
+estimador correcto para este modo, y es un estimador distinto, no el mismo con
+otros índices. Implementarlo como si fuera el mismo es el error clásico de este
+modo.
+
+Primero, un factor de decorrelación espectral que depende del ancho
+espectral —`|ρ(T)| = exp(-8π²σv²T²/λ²)`, `T` el retardo medio-PRT— o ρHV sale
+sistemáticamente bajo. Segundo, la propia autocorrelación temporal del blanco a
+ese retardo `T` acarrea una fase de Doppler —`arg(R_hv) = ΦDP_verdadero +
+θ_doppler`, con `θ_doppler = -4π·v·T/λ`, exactamente la misma forma que la fase
+de `R(1)` en pulse-pair, sólo que evaluada al retardo `T` en vez del PRT
+completo— que sesga ΦDP si no se resta usando la velocidad radial media ya
+estimada para la celda (pulse-pair sobre el canal H a su propio PRT).
 
 La consecuencia de diseño es que la etapa de polarimetría es una etapa con tres
 implementaciones detrás de una interfaz, seleccionada por el modo declarado del

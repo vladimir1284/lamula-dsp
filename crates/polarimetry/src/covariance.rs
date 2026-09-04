@@ -106,13 +106,27 @@ pub fn polarimetric_moments_simultaneous(
 /// Estima ZDR, ρHV y ΦDP en modo alternante (H/V conmutados pulso a pulso):
 /// `h`, `v` son las `M` muestras de cada canal, medidas a retardo medio-PRT
 /// entre sí (`h[i]` y `v[i]` separadas por `t_step_s`, la mitad del PRT de
-/// canal). ρHV se corrige por el factor de decorrelación espectral
+/// canal, con `h[i]` SIEMPRE la muestra anterior en el tiempo — mismo orden
+/// que genera `generate_alternating_dualpol` del oráculo). ρHV se corrige por
+/// el factor de decorrelación espectral
 /// `|ρ(T)| = exp(-8π²·sigma_v_mps²·t_step_s²/λ²)` (Sachidananda & Zrnić 1989,
 /// celda "Modo alternante" del oráculo) — `sigma_v_mps` es el ancho espectral
 /// ya estimado para la celda (p.ej. por pulse-pair sobre el canal H a su
-/// propio PRT), no se re-estima aquí. ZDR y ΦDP usan la misma fórmula directa
-/// que en modo simultáneo — ver limitación de ΦDP en la documentación del
-/// crate.
+/// propio PRT), no se re-estima aquí.
+///
+/// ΦDP se corrige por el término de fase Doppler que el propio retardo
+/// `t_step_s` introduce en `arg(R_hv)`: al no ser simultáneas, `R_hv` mide la
+/// covarianza cruzada a retardo `t_step_s`, y esa autocorrelación temporal
+/// del blanco acarrea su propia fase de Doppler, exactamente como `R(1)` en
+/// pulse-pair — `arg(R_hv) = ΦDP_verdadero + θ_doppler`, con
+/// `θ_doppler = -4π·velocity_mps·t_step_s/λ` (misma convención de signo que
+/// `PulsePairEstimate::velocity_mps`: covarianza `E[muestra_anterior ·
+/// conj(muestra_posterior)]`, `h` es la anterior). `velocity_mps` es la
+/// velocidad radial media ya estimada para la celda (pulse-pair sobre el
+/// canal H a su propio PRT) — no se re-estima aquí, mismo criterio que
+/// `sigma_v_mps`. Derivación y contraste contra oráculo: celda "Modo
+/// alternante" de `tools/oracles/polarimetria_covarianzas.ipynb` y
+/// `docs/algorithms/polarimetria-covarianzas.md` §"Cómo funciona".
 #[allow(clippy::too_many_arguments)]
 pub fn polarimetric_moments_alternating(
     h: &[Complex64],
@@ -120,6 +134,7 @@ pub fn polarimetric_moments_alternating(
     zdr_offset_db: f64,
     phidp_offset_deg: f64,
     sigma_v_mps: f64,
+    velocity_mps: f64,
     wavelength_m: f64,
     t_step_s: f64,
     min_snr_lin: f64,
@@ -143,7 +158,8 @@ pub fn polarimetric_moments_alternating(
     let zdr_db = 10.0 * (ph / pv).log10() - zdr_offset_db;
     let rho_measured = rhv.norm() / (ph * pv).sqrt();
     let rhohv = (rho_measured / rho_t).min(1.0);
-    let phidp_deg = wrap_deg(rhv.arg().to_degrees() - phidp_offset_deg);
+    let doppler_phase_rad = -4.0 * std::f64::consts::PI * velocity_mps * t_step_s / wavelength_m;
+    let phidp_deg = wrap_deg((rhv.arg() - doppler_phase_rad).to_degrees() - phidp_offset_deg);
 
     PolarimetricEstimate {
         zdr_db,
@@ -185,6 +201,62 @@ mod tests {
         let est = polarimetric_moments_simultaneous(&y, &y, 1.5, 10.0, 0.05);
         assert!((est.zdr_db - (-1.5)).abs() < 1e-9);
         assert!((est.phidp_deg - (-10.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn alternating_phidp_corrects_doppler_phase_from_half_prt_delay() {
+        let wavelength_m: f64 = 0.1;
+        let t_step_s: f64 = 1.0e-3;
+        let velocity_mps: f64 = 10.0;
+        let phidp_true_deg: f64 = 25.0;
+        let rho_true: f64 = 0.9;
+        let doppler_phase_rad =
+            -4.0 * std::f64::consts::PI * velocity_mps * t_step_s / wavelength_m;
+        let target_arg_rad = phidp_true_deg.to_radians() + doppler_phase_rad;
+
+        let h: Vec<Complex64> = (0..32)
+            .map(|i| Complex64::from_polar(1.0, i as f64 * 0.2))
+            .collect();
+        let v: Vec<Complex64> = (0..32)
+            .map(|i| Complex64::from_polar(rho_true, i as f64 * 0.2 - target_arg_rad))
+            .collect();
+
+        let est = polarimetric_moments_alternating(
+            &h,
+            &v,
+            0.0,
+            0.0,
+            0.0,
+            velocity_mps,
+            wavelength_m,
+            t_step_s,
+            0.05,
+        );
+        assert_eq!(est.flag, PolarimetricFlag::Ok);
+        assert!(
+            (est.phidp_deg - phidp_true_deg).abs() < 1e-9,
+            "phidp_deg={}",
+            est.phidp_deg
+        );
+
+        // Sin `velocity_mps` (sin corrección), el sesgo de fase Doppler del
+        // retardo medio-PRT queda sin restar.
+        let naive = polarimetric_moments_alternating(
+            &h,
+            &v,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            wavelength_m,
+            t_step_s,
+            0.05,
+        );
+        assert!(
+            (naive.phidp_deg - phidp_true_deg).abs() > 1.0,
+            "naive.phidp_deg={}",
+            naive.phidp_deg
+        );
     }
 
     #[test]

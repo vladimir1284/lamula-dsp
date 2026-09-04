@@ -266,6 +266,7 @@ fn alternating_rhohv_corrected_matches_truth() {
                 0.0,
                 0.0,
                 SIGMA_V,
+                MEAN_V,
                 WAVELENGTH_M,
                 T_STEP,
                 0.05,
@@ -280,6 +281,82 @@ fn alternating_rhohv_corrected_matches_truth() {
         assert!(
             (rho_mean - RHO_TRUE_ALT).abs() < BIAS_TOL_RHO,
             "M={m} rho_mean={rho_mean}"
+        );
+    }
+}
+
+/// Celda "Modo alternante" del oráculo, parte ΦDP: el término de fase
+/// Doppler de `arg(R_hv)` a retardo `t_step` es real (bias grande, ~sesgo
+/// esperado `-4π·MEAN_V·T_STEP/λ` en grados) y `polarimetric_moments_alternating`
+/// debe recuperar `PHIDP_TRUE` una vez corregido con `velocity_mps=MEAN_V`.
+#[test]
+fn alternating_phidp_corrected_matches_truth_naive_is_biased() {
+    let mut rng = StdRng::seed_from_u64(20260917);
+    const T_STEP: f64 = 1.0e-3;
+    const RHO_TRUE_ALT: f64 = 0.97;
+    for &m in &[48usize, 96] {
+        let n_trials = 80;
+        let (mut phidp_corrected_sum, mut phidp_naive_sum) = (0.0, 0.0);
+        let mut n_ok = 0usize;
+        for _ in 0..n_trials {
+            let (h, v) = generate_alternating_dualpol(
+                POWER_H,
+                SIGMA_V,
+                WAVELENGTH_M,
+                T_STEP,
+                m,
+                ZDR_TRUE,
+                RHO_TRUE_ALT,
+                PHIDP_TRUE,
+                NOISE_FLOOR,
+                &mut rng,
+            );
+            let corrected = polarimetric_moments_alternating(
+                &h,
+                &v,
+                0.0,
+                0.0,
+                SIGMA_V,
+                MEAN_V,
+                WAVELENGTH_M,
+                T_STEP,
+                0.05,
+            );
+            // Naive: mismo estimador con `velocity_mps=0.0`, equivalente a no
+            // corregir el término de fase Doppler -- reproduce el error
+            // clásico de aplicar la fórmula simultánea sin más en este modo.
+            let naive = polarimetric_moments_alternating(
+                &h,
+                &v,
+                0.0,
+                0.0,
+                SIGMA_V,
+                0.0,
+                WAVELENGTH_M,
+                T_STEP,
+                0.05,
+            );
+            if corrected.flag == PolarimetricFlag::Ok && naive.flag == PolarimetricFlag::Ok {
+                phidp_corrected_sum += corrected.phidp_deg;
+                phidp_naive_sum += naive.phidp_deg;
+                n_ok += 1;
+            }
+        }
+        assert!(n_ok > n_trials / 2, "demasiadas celdas censuradas");
+        let n_ok = n_ok as f64;
+        let corrected_bias = phidp_corrected_sum / n_ok - PHIDP_TRUE;
+        let naive_bias = phidp_naive_sum / n_ok - PHIDP_TRUE;
+        assert!(
+            corrected_bias.abs() < BIAS_TOL_PHIDP,
+            "M={m} corrected_bias={corrected_bias}"
+        );
+        // El sesgo Doppler esperado a estos parámetros es grande (~36°, ver
+        // `doppler_phase_rad` en el oráculo) -- muy por encima de
+        // `BIAS_TOL_PHIDP`, confirma que el efecto es real y no un artefacto
+        // de muestra finita.
+        assert!(
+            naive_bias.abs() > 10.0 * BIAS_TOL_PHIDP,
+            "M={m} naive_bias={naive_bias}"
         );
     }
 }
