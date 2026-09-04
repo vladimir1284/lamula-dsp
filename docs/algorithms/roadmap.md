@@ -325,12 +325,36 @@ contrastada contra ningún oráculo — ninguna de esas dos ramas de
 `nyquist_velocity`/`dual_prf_split`/`staggered_prt_split` usa
 `own_prt_for_main`, así que esa combinación (poco realista: alternar
 polarización Y PRF/PRT a la vez) queda sin comportamiento verificado, sólo
-sin pánico. Tampoco está contrastada la combinación alternante +
-`estimator = spectral` ni alternante + filtro de clutter/RFI — se enrutaron
-por el mismo `main_channel`/`own_prt_for_main` por consistencia (evitar la
-misma contaminación de (2) en cualquier otro consumidor de "el canal 0 tal
-cual"), pero ningún oráculo de este repositorio cubre esa interacción
-todavía.
+sin pánico.
+
+**Alternante + `estimator = spectral` / filtro de clutter/RFI — cerrado, sin
+fórmula nueva.** Las dos ramas ya se enrutaban por el mismo
+`main_channel`/`own_prt_for_main` que el pulse-pair principal, por
+consistencia (evitar la misma contaminación de (2) en cualquier otro
+consumidor de "el canal 0 tal cual"), pero eso no estaba probado — sólo
+inferido por analogía. Al revisarlo no hacía falta oráculo nuevo:
+`spectral_moments`/`clutter_filtered_power` no le piden nada especial a su
+serie de entrada más que ser uniforme y coherente a un PRT conocido, que es
+exactamente lo que `main_channel` ya garantiza (mismo argumento que (2) usó
+para justificar reutilizar `pulse_pair_moments` sin más). Dos tests de cableo
+nuevos en `ray::tests`
+(`alternating_polarization_wiring_routes_spectral_estimator_through_main_channel`,
+`...routes_clutter_filter_through_main_channel`): cada uno arma un radial
+alternante donde los pulsos de transmisión V llevan una señal deliberadamente
+muy distinta (un tono aislado mucho más fuerte) a la de la subserie H, y
+confirma que V/CCOR coinciden con `spectral_moments`/`clutter_filtered_power`
+llamados directamente sobre la subserie H sola, y difieren claramente de
+correr esos mismos estimadores sobre `channels[0]` intercalado completo al
+PRT crudo — mismo criterio que la prueba de ZDR/LDR de arriba. Nota de
+depuración: la primera versión del test de clutter falló por 0.4 dB con la
+verdad de referencia calculada a partir de un literal `f64` para
+`wavelength_m` en vez de `config.wavelength_m as f64` (el `f32` real que usa
+el cableo) — con el ancho de la ventana de clutter elegido como múltiplo
+exacto del espaciado de bin, el redondeo de punta a punta bastaba para mover
+un bin de borde al otro lado del umbral; no era un bug de `crates/service`,
+era la verdad de referencia del test tomando un camino de redondeo distinto
+al del cableo real. `cargo test -p lamula-dsp-service`/`cargo clippy -- -D
+warnings`/`cargo fmt --check` en verde.
 
 **ΦDP en modo alternante, término de fase Doppler del retardo medio-PRT —
 cerrado, fórmula.** El hueco que el propio oráculo de `crates/polarimetry`

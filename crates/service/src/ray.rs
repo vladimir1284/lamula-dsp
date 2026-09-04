@@ -3370,4 +3370,212 @@ mod tests {
             "UZ espectral ({se_uz}) debería quedar por debajo de UZ pulse-pair ({pp_uz}) por el recorte de línea principal; si son iguales, el estimador no se está seleccionando"
         );
     }
+
+    /// Intercala dos series pulso a pulso, `even[i]` en la posición `2i`
+    /// (transmisión H) y `odd[i]` en `2i+1` (transmisión V) — mismo orden
+    /// que produce el hardware real en modo alternante.
+    fn interleave_by_tx_parity(even: &[Complex64], odd: &[Complex64]) -> Vec<Complex64> {
+        even.iter()
+            .zip(odd.iter())
+            .flat_map(|(&e, &o)| [e, o])
+            .collect()
+    }
+
+    fn alternating_ray_flags(n_pulses: usize) -> Vec<u8> {
+        (0..n_pulses)
+            .map(|i| if i % 2 == 1 { tx_ray_flag::TX_POL_V } else { 0 })
+            .collect()
+    }
+
+    /// Celda "Lo que esto NO resuelve todavía" de `docs/algorithms/
+    /// roadmap.md` §"Decisiones cerradas": el estimador espectral alternativo
+    /// tampoco estaba contrastado en modo alternante. `main_channel` (la
+    /// subserie copolar H, PRT propio doblado) es una serie uniforme como
+    /// cualquier otra para `spectral_moments` -- no hace falta fórmula
+    /// nueva, sólo confirmar que el cableo la usa a ELLA, no al canal 0
+    /// intercalado completo.
+    #[test]
+    fn alternating_polarization_wiring_routes_spectral_estimator_through_main_channel() {
+        const M: usize = 32; // pulsos por canal, tras separar por paridad
+        const BIN_IDX: usize = 5;
+        const AMPLITUDE: f64 = 2.0;
+        // Mismo valor que `config.wavelength_m` (f32) ya redondeado a f64 --
+        // ver el comentario equivalente en la prueba del filtro de clutter.
+        const WAVELENGTH_M_F32: f32 = 0.10;
+        const WAVELENGTH_M: f64 = WAVELENGTH_M_F32 as f64;
+        const PRT_S: f64 = 1.0e-3; // = own_prt_s, ver config_with_thresholds
+        const OWN_PRT_FOR_MAIN: f64 = 2.0 * PRT_S;
+
+        let h_tone = pure_tone_series(AMPLITUDE, BIN_IDX, M);
+        // Relleno de los pulsos de transmisión V (cruzada HV, no es la
+        // subserie copolar H): un tono mucho más fuerte a otro bin -- si el
+        // cableo corriera el periodograma sobre `channels[0]` intercalado en
+        // vez de sobre `main_channel`, este relleno dominaría el resultado.
+        let filler = pure_tone_series(50.0, M / 4, M);
+        let ch0 = interleave_by_tx_parity(&h_tone, &filler);
+        let ch1 = ch0.clone(); // canal V: sólo necesita existir para que `alternating` se active.
+        let ray_flags = alternating_ray_flags(2 * M);
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: 0b0011,
+            channels: vec![vec![ch0.clone()], vec![ch1]],
+            ray_flags,
+            dropped_pulses: 0,
+        };
+
+        let se_truth = spectral_moments(&h_tone, WAVELENGTH_M, OWN_PRT_FOR_MAIN);
+        let se_v_truth = se_truth
+            .velocity_mps
+            .expect("tono puro muy por encima del umbral de ruido");
+
+        let mut config = polarimetric_config((1 << moment_kind::UZ) | (1 << moment_kind::V));
+        config.polarization_mode = polarization_mode::ALTERNATING;
+        config.estimator = estimator::SPECTRAL;
+        config.antenna_isolation_db = 30.0; // `alternating` siempre corre `ldr_db`, que exige > 0.
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { moments, .. } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        let v_wired = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::V)
+            .expect("falta el bloque de V")
+            .values[0];
+
+        assert!(
+            (v_wired as f64 - se_v_truth).abs() < 1e-3,
+            "V alternante+spectral ({v_wired}) debería coincidir con spectral_moments sobre la subserie H sola ({se_v_truth}), no sobre el canal intercalado"
+        );
+
+        // Cómputo ingenuo: periodograma sobre TODO `channels[0]` intercalado,
+        // al PRT crudo (sin separar por paridad ni doblar el PRT) -- si el
+        // cableo hiciera esto, V saldría dominado por `filler`.
+        if let Some(naive_v) = spectral_moments(&ch0, WAVELENGTH_M, PRT_S).velocity_mps {
+            assert!(
+                (naive_v - se_v_truth).abs() > 1.0,
+                "el cómputo ingenuo ({naive_v}) debería diferir claramente del correcto ({se_v_truth}); si coinciden, el bug de mezclar H/V no se estaría ejercitando"
+            );
+        }
+    }
+
+    /// Misma celda del roadmap que la prueba anterior, para el filtro de
+    /// clutter/RFI: `clutter_filtered_power` también corre sobre
+    /// `main_channel`, no sobre `channels[0]` intercalado.
+    #[test]
+    fn alternating_polarization_wiring_routes_clutter_filter_through_main_channel() {
+        // `config.wavelength_m` es `f32`; el cableo real siempre pasa
+        // `config.wavelength_m as f64` a `clutter_filtered_power`, así que la
+        // verdad de referencia tiene que partir del mismo valor ya
+        // redondeado -- si no, un bin justo en el borde de la ventana de
+        // clutter puede caer a un lado u otro por el ruido de redondeo entre
+        // los dos caminos, sin que sea un bug real.
+        const WAVELENGTH_M_F32: f32 = 0.10;
+        const WAVELENGTH_M: f64 = WAVELENGTH_M_F32 as f64;
+        const PRT_S: f64 = 1.0e-3;
+        const M: usize = 64; // pulsos por canal, tras separar por paridad
+        const OWN_PRT_FOR_MAIN: f64 = 2.0 * PRT_S;
+
+        let v_a = WAVELENGTH_M / (4.0 * OWN_PRT_FOR_MAIN);
+        let bin_spacing = 2.0 * v_a / M as f64;
+        let clutter_width_mps = (4.0 * bin_spacing) as f32;
+
+        let mut rng = StdRng::seed_from_u64(20260918);
+        let h_true = generate_cell_with_clutter(
+            1.0, // meteoro
+            0.0, // superpuesto al clutter
+            1.5,
+            100.0, // clutter 20 dB más fuerte
+            0.01,
+            WAVELENGTH_M,
+            OWN_PRT_FOR_MAIN,
+            M,
+            &mut rng,
+        );
+        // Relleno de los pulsos de transmisión V: un tono aislado mucho más
+        // fuerte que meteoro+clutter -- si el cableo mezclara esto con
+        // `h_true` en vez de separarlo, el CCOR resultante quedaría muy
+        // lejos del correcto.
+        let filler = pure_tone_series(50.0, M / 3, M);
+        let ch0 = interleave_by_tx_parity(&h_true, &filler);
+        let ch1 = ch0.clone();
+        let ray_flags = alternating_ray_flags(2 * M);
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: 0b0011,
+            channels: vec![vec![ch0.clone()], vec![ch1]],
+            ray_flags,
+            dropped_pulses: 0,
+        };
+
+        let pp_truth = pulse_pair_moments(&h_true, WAVELENGTH_M, OWN_PRT_FOR_MAIN);
+        let truth = clutter_filtered_power(
+            &h_true,
+            pp_truth.s_linear,
+            pp_truth.noise_floor_estimate,
+            WAVELENGTH_M,
+            OWN_PRT_FOR_MAIN,
+            clutter_width_mps as f64,
+            clutter_filter::GMAP,
+            false,
+        );
+
+        let config = Config {
+            polarization_mode: polarization_mode::ALTERNATING,
+            antenna_isolation_db: 30.0, // `alternating` siempre corre `ldr_db`, que exige > 0.
+            ..clutter_config(clutter_filter::GMAP, clutter_width_mps, CCOR_MOMENTS_MASK)
+        };
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { moments, .. } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        let ccor_wired = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::CCOR)
+            .expect("falta el bloque de CCOR")
+            .values[0];
+
+        assert!(
+            (ccor_wired as f64 - truth.ccor_db).abs() < 0.05,
+            "CCOR alternante ({ccor_wired}) debería coincidir con clutter_filtered_power sobre la subserie H sola ({truth_ccor}), no sobre el canal intercalado",
+            truth_ccor = truth.ccor_db
+        );
+
+        // Ingenuo: correr el filtro sobre TODO `channels[0]` intercalado, al
+        // PRT crudo -- el relleno V lo contamina.
+        let pp_naive = pulse_pair_moments(&ch0, WAVELENGTH_M, PRT_S);
+        let naive = clutter_filtered_power(
+            &ch0,
+            pp_naive.s_linear,
+            pp_naive.noise_floor_estimate,
+            WAVELENGTH_M,
+            PRT_S,
+            clutter_width_mps as f64,
+            clutter_filter::GMAP,
+            false,
+        );
+        assert!(
+            (naive.ccor_db - truth.ccor_db).abs() > 3.0,
+            "el cómputo ingenuo ({naive_ccor}) debería diferir claramente del correcto ({correct_ccor})",
+            naive_ccor = naive.ccor_db,
+            correct_ccor = truth.ccor_db
+        );
+    }
 }
