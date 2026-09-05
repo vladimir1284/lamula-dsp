@@ -476,7 +476,9 @@ dependencies = [
 name = "lamula-simulator"
 version = "0.1.0"
 dependencies = [
+ "lamula-burst",
  "lamula-contract",
+ "lamula-ingest",
  "rand",
  "rand_distr",
  "rustfft",

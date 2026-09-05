@@ -718,6 +718,38 @@ sirve para detectar una regresión relativa entre dos ejecuciones en la misma m�
 real. `make bench` corre el benchmark; deliberadamente fuera de `make check`/CI hasta que exista ese presupuesto.
 `cargo build`/`cargo test --workspace`/`cargo clippy --all-targets -- -D warnings`/`cargo fmt --check` en verde.
 
+**Fase 4 — inyección de fallos en `crates/simulator`, alcance Stage 1 declarado en `docs/dsp-plan.md` §3.1.**
+El plan pide explícitamente que el simulador soporte "fault injection (malformed frames, dropped rays, encoder
+glitches, frequency drift) for BITE testing" — hasta este cambio, `crates/simulator` no tenía nada de esto (su propio
+`lib.rs` marcaba "firma de transmisor (magnetrón/coherente + burst)" como fuera de alcance). Dos módulos nuevos:
+
+`fault` cubre las tres categorías mecánicas sobre una trama ya empaquetada por `pack_rays` — sin fórmula propia, sólo
+manipulación de bytes/listas: `corrupt_frame`/`FrameFault` (magic inválido, versión no soportada, cabecera/payload
+truncados, `payload_len` inflado — cada variante contrastada contra el `IngestError` real que produce
+`lamula_ingest::wire::decode_ray_frame`, no sólo "no revienta"), `drop_rays` (descarta tramas por índice, para
+ejercitar el conteo de `dropped_pulses` de `RadialAssembler`) e `inject_encoder_glitch` (sobrescribe
+`azimuth_raw`/`elevation_raw` de una trama por offset de bytes, confirmado con un test que decodifica antes/después y
+compara que sólo esos dos campos cambiaron).
+
+`burst` cierra el hueco de "firma de transmisor" que el propio `lib.rs` señalaba: `magnetron_phase_sequence` (fase
+uniforme e independiente por pulso), `drifting_phase_sequence` (fase acumulada de un perfil de frecuencia arbitrario
+en el tiempo — agnóstico de si el eje es pulso a pulso para `AfcLoop` o tiempo rápido dentro de una ventana de burst
+para `burst_freq_estimate`, ver su doc-comment), `apply_transmit_phase` (aplica esa fase a un canal de eco coherente,
+generalizando lo que `crates/service::ray::tests::burst_phase_correction_recovers_velocity_from_magnetron_pulse_to_pulse_phase_noise`
+armaba a mano) y `generate_burst` (la muestra de burst en sí, amplitud + fase + ruido térmico). Ninguna fórmula nueva
+que oracular — reutiliza y contrasta contra `crates/burst` (`burst_freq_estimate`/`burst_phase_estimate`/
+`correct_phase`), que ya tiene su propio oráculo; los tests de este módulo son de cableo/sanity, no de exactitud
+nueva. Requirió `lamula-burst`/`lamula-ingest` como dev-dependencies nuevas de `crates/simulator` — ciclo de
+dev-dependencies con `crates/ingest` (que ya depende de `lamula-simulator` en sus propios tests), explícitamente
+soportado por Cargo. `cargo test --workspace`/`cargo clippy --all-targets -- -D warnings`/`cargo fmt --check` en
+verde.
+
+**Lo que esto NO resuelve**: nada consume estos generadores todavía desde un escenario de BITE guionado de punta a
+punta (el plan pide "scripted weather/clutter/noise scenarios" — este cambio da las piezas, no un guion armado); el
+registro de fidelidad simulador-vs-real (§10 "Simulator-fidelity register") sigue sin existir; y clutter/multi-trip/RFI
+narrowband/polarización alternante siguen fuera de alcance del simulador (mismo estado que antes de este cambio, ver
+el doc-comment de `crate`).
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.
