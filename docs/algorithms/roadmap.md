@@ -764,6 +764,23 @@ Fase 0 todavía no decide, fugas de memoria (sin herramienta de instrumentación
 por TCP bajo carga sostenida (`tests/end_to_end.rs` ya cubre el binario real, pero a una sola conexión corta). El
 propio test lo documenta en su doc-comment para que quede claro qué reemplaza y qué no.
 
+**Fase 4 — empaquetado offline/air-gapped, alcance Stage 1 declarado en `docs/dsp-plan.md` §3.1.** El plan pide "an
+offline, air-gapped installer for the Linux SBC (systemd service); reproducible offline build" — no existía ningún
+artefacto de esto. Se agregaron tres piezas, documentadas en `docs/despliegue.md` (página nueva, con nav propio en
+`mkdocs.yml`): `tools/offline_build.sh` (dos fases separadas — `vendor` con red genera el árbol vendorizado y la
+config de Cargo que apunta a él; `build` compila `--offline --release` exclusivamente desde ahí — las dos verificadas
+de punta a punta en esta sesión contra este `Cargo.lock`), `packaging/lamula-dsp.service` (unidad systemd con
+`Restart=on-failure` — coherente con que `crates/ingest`/`crates/rcp-link` ya reconectan solos, así que si el proceso
+termina fue un fallo real — y endurecimiento básico gratuito: `NoNewPrivileges`, `ProtectSystem=strict`, sin
+`ReadWritePaths` porque este binario no escribe nada en disco hoy) y `packaging/lamula-dsp.env.example` (las nueve
+variables obligatorias de `crates/service::config::ServiceConfig`, documentadas una por una con el porqué de que
+ninguna tenga valor por defecto — consolida en un solo lugar un listado que hasta ahora vivía repartido entre el
+doc-comment de `config.rs` y cada punto de uso).
+
+**Lo que esto NO resuelve**: no hay instalador real (`.deb`/`.rpm`/imagen de SBC), no hay cross-compilación ARM
+(Fase 0 no decidió CPU/SBC objetivo todavía), y el archivo de I/Q crudo de investigación (mismo §3.1) sigue sin
+cablear en `crates/service` — la unidad systemd lo señala explícitamente en vez de fingir que ya existe.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.

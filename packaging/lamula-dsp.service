@@ -1,0 +1,51 @@
+# Unidad systemd del proceso DSP real (`crates/service`, binario `lamula-dsp`).
+# Ver `docs/despliegue.md` para instalación completa y el significado de cada
+# variable de `lamula-dsp.env` — este fichero sólo arranca el binario, no
+# documenta la configuración.
+#
+# Instalación (SBC air-gapped, systemd):
+#   install -Dm755 lamula-dsp /opt/lamula-dsp/bin/lamula-dsp
+#   install -Dm640 lamula-dsp.env /etc/lamula-dsp/lamula-dsp.env
+#   install -Dm644 lamula-dsp.service /etc/systemd/system/lamula-dsp.service
+#   useradd --system --no-create-home --shell /usr/sbin/nologin lamula-dsp
+#   systemctl daemon-reload
+#   systemctl enable --now lamula-dsp
+
+[Unit]
+Description=LAMULA DSP — moment estimation service (DRx/1GbE in, RCP/1GbE out)
+Documentation=https://github.com/vladimir1284/lamula-dsp
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lamula-dsp
+Group=lamula-dsp
+EnvironmentFile=/etc/lamula-dsp/lamula-dsp.env
+ExecStart=/opt/lamula-dsp/bin/lamula-dsp
+
+# Reinicio automático: un cierre limpio de DRx/RCP no termina el proceso
+# (`crates/ingest`/`crates/rcp-link` reconectan solos, ver sus doc-comments);
+# si el binario sí termina, es porque una de las dos tareas murió por un
+# fallo real de socket (ver `crates/service/src/main.rs`) — reintentar tiene
+# sentido, no es un fallo de configuración que reiniciar vaya a repetir en
+# bucle apretado.
+Restart=on-failure
+RestartSec=5
+
+# Endurecimiento — air-gapped y de un solo operador (`docs/dsp-plan.md`
+# §3.2 excluye hardening/autenticación de alcance), pero esto es gratis y no
+# cambia el comportamiento: el proceso no necesita nada de lo que restringe.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+# Sin `ReadWritePaths`: este binario no escribe nada en disco hoy (el
+# archivo de I/Q crudo de investigación que `docs/dsp-plan.md` §3.1 pone en
+# alcance Stage 1 — "Raw I/Q archive" — no está implementado en
+# `crates/service` todavía, ver el doc-comment de `crate` en `main.rs`).
+# Cuando exista, esta unidad necesita un `ReadWritePaths=` apuntando a su
+# directorio.
+
+[Install]
+WantedBy=multi-user.target

@@ -15,6 +15,12 @@ site/
 /target/
 **/*.rs.bk
 
+# tools/offline_build.sh: vendorizado local (fase 1) y su config de cargo
+# (fase 2) — reproducibles bajo demanda, no se commitean (ver el propio
+# script y docs/despliegue.md).
+/vendor/
+/.cargo/
+
 # Python
 __pycache__/
 .pytest_cache/
