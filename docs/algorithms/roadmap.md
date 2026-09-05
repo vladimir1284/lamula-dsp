@@ -750,6 +750,20 @@ registro de fidelidad simulador-vs-real (§10 "Simulator-fidelity register") sig
 narrowband/polarización alternante siguen fuera de alcance del simulador (mismo estado que antes de este cambio, ver
 el doc-comment de `crate`).
 
+**Fase 4 — semilla de endurance/soak (`crates/service/tests/soak.rs`), no el soak real que pide el plan.**
+`docs/dsp-plan.md` §10 pide "endurance/soak runs (long unattended processing at worst-case PRF/range)" en fase 4. No
+hay hardware ni entorno de horas de duración en esta sesión, así que se agregó lo reproducible: una prueba que corre
+2000 radiales sintéticos variados (gate count 1–50, filtro de clutter GMAP/ninguno alternando, RFI activo una vuelta
+de cada tres) de punta a punta por el pipeline real — `pack_rays` → `decode_ray_frame` → `RadialAssembler` (la misma
+ingesta que usa `crates/ingest::tcp`) → `build_moment_ray` —, comprobando que `ray_seq` es monótono y que ningún
+momento publicado sale infinito (la censura explícita produce NaN a propósito; eso no es una falla). Corre en ~8 s
+como parte de `cargo test`/`make test`, no aparte.
+
+**Lo que esto NO prueba**: horas de duración real, la PRF/rango efectivamente peor caso de un hardware objetivo que
+Fase 0 todavía no decide, fugas de memoria (sin herramienta de instrumentación en este entorno), ni el binario real
+por TCP bajo carga sostenida (`tests/end_to_end.rs` ya cubre el binario real, pero a una sola conexión corta). El
+propio test lo documenta en su doc-comment para que quede claro qué reemplaza y qué no.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.
