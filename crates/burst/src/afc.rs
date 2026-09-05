@@ -78,9 +78,74 @@ impl AfcLoop {
     }
 }
 
+/// Convierte una corrección de frecuencia (offset respecto de la nominal,
+/// Hz — típicamente [`AfcLoop::freq_hz`]) a la palabra de fase absoluta del
+/// NCO que transporta el mensaje `Afc` del contrato `DRx↔DSP`
+/// (`contract/vendor/drx_dsp_v0_1.rs`, campo `nco_phase_inc`;
+/// `docs/algorithms/burst-fase-afc.md` §"Lazo de AFC"; decisión D-02 del
+/// proyecto DRx). Convención DDS estándar de acumulador de fase:
+/// `phase_inc = round(freq_offset_hz / fs_hz * 2^word_bits)`, envuelto módulo
+/// `2^word_bits` — un offset negativo sale como el complemento correspondiente
+/// dentro de esa anchura, tal como espera un acumulador que envuelve módulo
+/// `2^word_bits` sin signo.
+///
+/// **`fs_hz` y `word_bits` no vienen de ningún contrato de este repositorio.**
+/// Ni `DRx↔DSP` ni `DSP↔RCP` exponen la frecuencia de referencia ni la
+/// anchura del acumulador de fase del NCO de recepción del DRx —
+/// `docs/dsp-plan.md` sólo documenta 250 MSPS como reloj del ADC, y nada en
+/// este repositorio confirma si el NCO usa ese mismo reloj o uno derivado.
+/// Mismo tipo de hueco sin campo propio en el contrato que
+/// `MAGNETRON_TRANSMITTER`/`ZPHI_A_COEF_DB_PER_DEG` en `crates/service::ray`
+/// (ver `docs/algorithms/roadmap.md` §"Decisiones cerradas"): quien llame
+/// tiene que pasar los valores reales del hardware DRx, confirmados contra su
+/// especificación, antes de comisionar contra hardware real — esta función
+/// sólo hace la aritmética, no fija esos dos valores.
+pub fn nco_phase_inc_for_freq_offset(freq_offset_hz: f64, fs_hz: f64, word_bits: u32) -> u64 {
+    assert!(fs_hz > 0.0, "fs_hz debe ser positivo");
+    assert!(
+        (1..=63).contains(&word_bits),
+        "word_bits debe estar en 1..=63 (evita desbordar el acumulador u64)"
+    );
+    let modulus = (1u64 << word_bits) as f64;
+    let raw = (freq_offset_hz / fs_hz) * modulus;
+    raw.round().rem_euclid(modulus) as u64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nco_phase_inc_is_zero_for_zero_offset() {
+        assert_eq!(nco_phase_inc_for_freq_offset(0.0, 250e6, 32), 0);
+    }
+
+    #[test]
+    fn nco_phase_inc_matches_quarter_turn() {
+        // offset = fs/4, 8 bits: un cuarto de vuelta = 256/4 = 64.
+        let word = nco_phase_inc_for_freq_offset(25.0, 100.0, 8);
+        assert_eq!(word, 64);
+    }
+
+    #[test]
+    fn nco_phase_inc_wraps_negative_offset_to_twos_complement_equivalent() {
+        // offset = -fs/4, 8 bits: envuelve a 256 - 64 = 192.
+        let word = nco_phase_inc_for_freq_offset(-25.0, 100.0, 8);
+        assert_eq!(word, 192);
+    }
+
+    #[test]
+    fn nco_phase_inc_wraps_at_full_scale() {
+        // offset = fs (una vuelta completa) envuelve a 0, no a `modulus`.
+        let word = nco_phase_inc_for_freq_offset(100.0, 100.0, 8);
+        assert_eq!(word, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "fs_hz")]
+    fn nco_phase_inc_rejects_non_positive_fs() {
+        nco_phase_inc_for_freq_offset(1.0, 0.0, 8);
+    }
 
     #[test]
     fn gain_matches_first_order_formula() {

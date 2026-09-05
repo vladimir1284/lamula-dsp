@@ -13,5 +13,5 @@
 mod afc;
 mod phase;
 
-pub use afc::{loop_gain, AfcLoop, AfcUpdate};
+pub use afc::{loop_gain, nco_phase_inc_for_freq_offset, AfcLoop, AfcUpdate};
 pub use phase::{burst_freq_estimate, burst_phase_estimate, correct_phase};
