@@ -1,0 +1,19 @@
+[package]
+name = "lamula-sz864"
+description = "Recuperación de segundo trip por codificación de fase SZ(8/64) del LAMULA DSP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+lamula-burst = { path = "../burst" }
+lamula-dual-prf = { path = "../dual-prf" }
+lamula-moments = { path = "../moments" }
+lamula-spectral = { path = "../spectral" }
+rustfft = "6"
+
+[dev-dependencies]
+lamula-simulator = { path = "../simulator" }
+rand = "0.8"
+rand_distr = "0.4"

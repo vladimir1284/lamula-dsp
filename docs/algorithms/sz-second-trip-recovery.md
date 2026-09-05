@@ -19,7 +19,11 @@ Dado que esta técnica exige generar en transmisión un patrón de fase específ
 Ésta es la página del conjunto con la dependencia de hardware más estricta.
 SZ(8/64) exige un excitador capaz de imponer una fase programada pulso a pulso,
 lo que en la práctica significa transmisor coherente con modulación de fase
-gobernable. **Con un magnetrón no se puede aplicar SZ** —la fase no se elige— pero
+gobernable. **Confirmado (2026-09-04): con klistrón, el excitador de la
+instalación sí soporta esta modulación** — el bloqueo de hardware que motivaba
+la deferencia a Stage 2 queda cerrado para esta variante del Eje 1; lo que
+sigue abierto es sólo de alcance/prioridad de roadmap, no de capacidad física.
+**Con un magnetrón no se puede aplicar SZ** —la fase no se elige— pero
 sí existe la vía análoga que explota la aleatoriedad natural del magnetrón, que
 se describe en [dealiasing de rango](dealiasing-de-rango.md). Es decir: las dos
 configuraciones tienen camino, pero son caminos distintos, y ninguno de los dos
@@ -36,6 +40,50 @@ De `config`: `range_dealias` como interruptor. La capacidad real se declara en
 codificar fase debe declararlo así en vez de aceptar el bit sin hacer nada.
 Publica `unambiguous_range_m`, que el contrato define como `c/(2·PRF)` salvo
 recuperación de trip.
+
+## Oráculo
+
+[`tools/oracles/sz_second_trip_recovery.ipynb`](../../tools/oracles/sz_second_trip_recovery.ipynb) —
+paso 1 del método, hecho pese a la deferencia a Stage 2 (ver "Relevancia para
+LAMULA DSP" arriba), a pedido explícito. Cubre construcción del código
+(verificación de periodicidad a 32 pulsos y de la estructura de 8 réplicas
+espectrales equiespaciadas), sesgo de velocidad del trip fuerte con y sin
+código, y recuperación de velocidad del trip débil vía notch + recoherencia,
+en función de la razón de potencias entre trips. La fórmula del código se tomó
+de una fuente secundaria (Meymaris, Hubbert & Ellis 2005, AMS — de acceso
+público) que cita literalmente a Sachidananda & Zrnić (1999); el paper original
+está bloqueado en este entorno (mismo 403 de AMS/ResearchGate ya documentado en
+`roadmap.md` para la varianza de pulse-pair). Fuera de alcance, declarado en el
+propio notebook: ancho espectral de cualquiera de los dos trips (exige
+"magnitude deconvolution", no implementada), potencia del trip fuerte vía
+notch (exige un factor de corrección según ancho de notch, no reproducido), y
+más de dos trips solapados. La confirmación de hardware (excitador con fase
+programable) que faltaba al escribir este oráculo ya llegó — ver más abajo.
+
+## Implementación
+
+`crates/sz864` (paso 2 y 3 del método): `sz_8_64_phases` (construcción del
+código, con los mismos dos tests de la Prueba 1 del oráculo como tests
+unitarios deterministas — periodicidad a 32 pulsos y las 8 réplicas
+equiespaciadas) y `separate_trips` (decodificación al trip fuerte, notch
+centrado en su velocidad ya estimada, recoherencia del residuo al trip
+débil), contrastado numéricamente contra el oráculo en
+`crates/sz864/tests/against_oracle.rs` (Pruebas 2 y 3, mismas tolerancias).
+Reutiliza sin reimplementar `lamula_burst::correct_phase`,
+`lamula_moments::pulse_pair_moments`, `lamula_dual_prf::fold` y
+`lamula_spectral::bin_velocity`. `cargo build`/`cargo test --workspace`/
+`cargo clippy -- -D warnings`/`cargo fmt --check` en verde. Mismo alcance y
+mismas exclusiones que el oráculo (ver arriba): sólo velocidad está
+contrastada para el trip débil, no potencia ni ancho espectral.
+
+**Sin cablear en `crates/service::ray`.** Este crate es librería pura, sin
+sitio de llamada en el pipeline — cablearlo exige antes decidir cómo el
+contrato declara "instalación klistrón con código SZ activo" (algo análogo a
+`polarization_mode`/`antenna_isolation_db`: un campo nuevo, no una inferencia
+de `capability_flags::range_dealias` existente, que hoy no distingue esta
+vía de la de fase aleatoria en magnetrón) y cómo el excitador recibe el
+patrón de fase pulso a pulso a transmitir — trabajo de contrato e
+integración con DRx, no de algoritmo.
 
 ## Criterio de aceptación
 

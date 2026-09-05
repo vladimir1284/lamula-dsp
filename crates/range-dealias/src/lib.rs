@@ -9,8 +9,9 @@
 //! [`lamula-burst`](../burst) y el estimador pulse-pair de
 //! [`lamula-moments`](../moments).
 //!
-//! Fuera de alcance de este crate (ver la página y el oráculo): SZ(8/64),
-//! diferido a Stage 2 en su propia página; la vía indirecta de información
+//! Fuera de alcance de este crate (ver la página y el oráculo): SZ(8/64) —
+//! camino aparte para transmisor coherente con fase programable, ver
+//! [`lamula_sz864`](../../sz864), no "lo mismo con otro nombre"—; la vía indirecta de información
 //! de rango por staggered-PRT, que la página menciona sin criterio de
 //! aceptación propio; y la interacción con polarimetría alternante, nota de
 //! diseño sin cantidad numérica propia en el oráculo. El modelo de

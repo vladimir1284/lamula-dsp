@@ -99,16 +99,16 @@ entre algoritmos.
 | 0 (W1–3) | [Simulador de I/Q](simulador-iq.md); kernel numérico (FFT, ventanas, SIMD); arnés de oráculo en Python |
 | 1 → M1 (W4–10) | [Ruido y umbrales](ruido-y-umbrales.md); potencia → UZ y [cadena de calibración](reflectivity-calibration.md); [procesamiento de rango y modos de barrido](procesamiento-de-rango.md); [burst, corrección de fase y AFC](burst-fase-afc.md) |
 | 2 → M2 (W11–18) | [Pulse-pair](pulse-pair-moments.md); [índices de calidad](indices-de-calidad.md); [estimador espectral](estimador-espectral.md); [GMAP](gmap-clutter-filtering.md) y [mapas de clutter](mapas-de-clutter.md); [filtrado de RFI](rfi-filtrado.md); [dual-PRF](dual-prf-dealiasing.md); [staggered-PRT](staggered-prt.md) |
-| 3 → M3 (W19–27) | [Covarianzas polarimétricas](polarimetria-covarianzas.md); [KDP](kdp-estimacion.md); [calibración polarimétrica](calibracion-polarimetrica.md); [dealiasing de rango](dealiasing-de-rango.md); [analizador de espectro de FI](analizador-espectro-fi.md); [corrección de atenuación Z-PHI](atenuacion-zphi.md) |
+| 3 → M3 (W19–27) | [Covarianzas polarimétricas](polarimetria-covarianzas.md); [KDP](kdp-estimacion.md); [calibración polarimétrica](calibracion-polarimetrica.md); [dealiasing de rango](dealiasing-de-rango.md); [analizador de espectro de FI](analizador-espectro-fi.md); [corrección de atenuación Z-PHI](atenuacion-zphi.md); [SZ(8/64)](sz-second-trip-recovery.md) (sólo instalación klistrón, promovido desde Stage 2 el 2026-09-04) |
 | 4 → M4 (W28–34) | Validación de exactitud contra varianza teórica y regresión Vesta; gates de rendimiento |
 
 **Estado del paso 1 del método (oráculo en Python).** Completo para todo el
-trabajo de fase 0 a fase 3: cada algoritmo de la tabla —salvo el kernel
-numérico, que no tiene fórmula propia que oracular, y salvo
-[SZ(8/64)](sz-second-trip-recovery.md), diferido a Stage 2 por su propia
-página— tiene su notebook en `tools/oracles/`, enlazado desde la página del
-algoritmo correspondiente, ejecutable de punta a punta con `make
-test-oracles`. El paso 2 (implementación en Rust) y el paso 3 (test de
+trabajo de fase 0 a fase 3, y también, a pedido explícito y pese a que la
+propia página lo difiere a Stage 2, para [SZ(8/64)](sz-second-trip-recovery.md)
+— el único algoritmo de la tabla que le queda sin oráculo es el kernel
+numérico, que no tiene fórmula propia que oracular. Cada uno tiene su notebook
+en `tools/oracles/`, enlazado desde la página del algoritmo correspondiente,
+ejecutable de punta a punta con `make test-oracles`. El paso 2 (implementación en Rust) y el paso 3 (test de
 contraste numérico) están hechos para el simulador de I/Q (`crates/simulator`),
 para la mitad con oráculo de [ruido y umbrales](ruido-y-umbrales.md)
 (`crates/noise`: estimación HS74, resta, censura por `sig_threshold`) y para
@@ -168,9 +168,14 @@ ganancia coherente y corrección ENBW explícita para el suelo de ruido) y para
 [corrección de atenuación Z-PHI](atenuacion-zphi.md) (`crates/attenuation`:
 perfil de atenuación específica cerrado, Testud et al. 2000, cableado sobre
 CZ en `crates/service::ray` — el alcance nuevo que "Decisiones cerradas" más
-abajo decidió agregarle a CZ). Con esto queda completa la fase 3 del plan de
-trabajo en los pasos 2 y 3 del método, incluido este último algoritmo que no
-estaba en la tabla original de esta sección.
+abajo decidió agregarle a CZ) y para
+[SZ(8/64)](sz-second-trip-recovery.md) (`crates/sz864`: construcción del
+código y separación de dos trips por notch + recoherencia — promovido a
+Stage 1 el 2026-09-04 sólo para instalación klistrón, ver "Decisiones
+cerradas"; sin cablear en `crates/service::ray`, ver la página del
+algoritmo). Con esto queda completa la fase 3 del plan de trabajo en los
+pasos 2 y 3 del método para toda instalación klistrón; con magnetrón, SZ(8/64)
+no aplica y la fase 3 ya estaba completa sin él.
 
 **Dependencia que mueve una pieza de fase.** El plan sitúa el burst/AFC en la
 fase 2, junto al resto de la suite Doppler. Si la instalación es de magnetrón,
@@ -615,6 +620,45 @@ estimador en función de M/SNR, así que no cierra el hueco de fase 4. **Sigue a
 varianza teórica del pulse-pair necesita o bien acceso directo al capítulo 6 de Doviak & Zrnić / Zrnić (1977), o una
 derivación propia hecha con más cuidado del que permitió esta sesión (la corrección "tren contiguo" de Zrnić 1977 no
 es trivial). No hornear ningún margen de tolerancia numérico basado en las fórmulas descartadas arriba.
+
+**SZ(8/64) — oráculo hecho pese a la deferencia a Stage 2, a pedido explícito; sin cablear, sin confirmar hardware.**
+La página de [SZ(8/64)](sz-second-trip-recovery.md) excluye este algoritmo del paso 1 del método a propósito, condicionado
+a que algún excitador de la instalación soporte modulación de fase programable pulso a pulso — condición que sigue sin
+confirmarse. Se preguntó antes de escribir el notebook si convenía primero chequear esa condición con el equipo de
+hardware; se decidió avanzar con el oráculo de todos modos porque el paso 1 del método no depende de hardware, sólo de
+la fórmula. El paper original (Sachidananda & Zrnić 1999, JAOT) está bloqueado en este entorno con el mismo tipo de 403
+ya documentado arriba para AMS/ResearchGate; la fórmula del código (`φ_k = 8πk²/64`, `ψ_0 = 0`, relación recursiva
+`φ_k = ψ_{k-1} - ψ_k`) se tomó de una fuente secundaria de acceso público que la cita literalmente (Meymaris, Hubbert &
+Ellis 2005, AMS) — inferencia con cita, no verificación directa contra la fuente primaria. El propio notebook
+(`tools/oracles/sz_second_trip_recovery.ipynb`) hace una comprobación cruzada independiente de esa transcripción:
+reproduce numéricamente la propiedad que la literatura le atribuye a la fórmula (el código dispersa la señal del trip
+adyacente en exactamente 8 réplicas espectrales equiespaciadas, verificado por FFT directa del código, no supuesto).
+Con esa base, demuestra el efecto citado como ventaja de la codificación — el sesgo de velocidad del trip fuerte se
+mantiene dentro de 1 m/s de la verdad en todo un barrido de razón de potencias -10..10 dB, contra un error que supera
+2 m/s sin codificar tan pronto el segundo trip iguala o supera al primero — e implementa una versión simplificada del
+algoritmo de separación real (notch centrado en la velocidad del trip fuerte + recoherencia al trip débil), que
+recupera la velocidad del trip débil con sesgo menor a 1 m/s y desviación menor a 2 m/s en el rango moderado (-5 a
+-10 dB), degradándose de forma clara y medible en el caso extremo (-20 dB, desviación mayor a 5 m/s) — el mismo patrón
+de curva de error frente a razón de potencias que pide el criterio de aceptación de la página, aunque sin las cifras
+exactas de la fuente porque el escenario simulado es propio, no el suyo. Fuera de alcance, declarado en el propio
+notebook: ancho espectral de cualquiera de los dos trips (exige "magnitude deconvolution" de Sachidananda & Zrnić 1999 /
+Frush & Doviak 2002, no implementada), potencia del trip fuerte vía notch con factor de corrección, más de dos trips
+solapados, ventaneo/corrección de sidelobes, e interacción con polarimetría alternante.
+
+**Confirmado 2026-09-04: con klistrón, el excitador sí soporta fase programable pulso a pulso — la fase se sintetiza
+digitalmente en FI, sin restricción de la etapa de RF.** Cierra el bloqueo de hardware que dejaba este workstream en
+"sólo oráculo, sin justificación para pasar a Rust" — para la variante klistrón del Eje 1. Con magnetrón sigue sin
+aplicar SZ (la vía ahí es la recuperación por fase aleatoria de [dealiasing de rango](dealiasing-de-rango.md), ya
+cableada). A pedido explícito, se promovió SZ(8/64) de "Stage 2 / diferido" a compromiso real de Stage 1 para
+instalación klistrón: paso 2 y paso 3 del método hechos en `crates/sz864` (construcción del código con los mismos dos
+tests de la Prueba 1 del oráculo como tests unitarios, y separación de trips por notch + recoherencia, contrastada
+contra las Pruebas 2 y 3 en `crates/sz864/tests/against_oracle.rs`), reutilizando sin reimplementar
+`lamula_burst::correct_phase`, `lamula_moments::pulse_pair_moments`, `lamula_dual_prf::fold` y
+`lamula_spectral::bin_velocity`. `cargo build`/`cargo test --workspace`/`cargo clippy -- -D warnings`/`cargo fmt --check`
+en verde. **Sigue sin cablear en `crates/service::ray`**: falta que el contrato distinga esta vía de la de fase
+aleatoria en magnetrón (hoy ambas comparten el mismo bit `range_dealias`, ver la decisión de arriba) y falta el canal
+por el que el excitador recibe el patrón de fase a transmitir — trabajo de contrato e integración con DRx, no de
+algoritmo, y no emprendido en este cambio.
 
 ## Referencias abiertas / implementaciones libres
 

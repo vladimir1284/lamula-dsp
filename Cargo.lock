@@ -277,6 +277,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "lamula-sz864"
+version = "0.1.0"
+dependencies = [
+ "lamula-burst",
+ "lamula-dual-prf",
+ "lamula-moments",
+ "lamula-simulator",
+ "lamula-spectral",
+ "rand",
+ "rand_distr",
+ "rustfft",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.189"
 source = "registry+https://github.com/rust-lang/crates.io-index"
