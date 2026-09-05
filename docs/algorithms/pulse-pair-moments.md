@@ -46,6 +46,59 @@ espectral se satura, y σv muy pequeño, donde la fórmula del logaritmo se vuel
 numéricamente delicada; los dos extremos deben tener comportamiento declarado y
 no un NaN.
 
+## Contraste cruzado contra SIGMET RVP8
+
+La fase 4 del [plan de trabajo](roadmap.md) pide contrastar sesgo y varianza
+contra la curva teórica de Doviak & Zrnić cap. 6 — sin acceso al texto en este
+entorno, ese contraste sigue abierto (ver roadmap). Como verificación
+independiente de que las *fórmulas de los estimadores* (no su varianza) están
+bien portadas, se contrastaron algebraicamente contra el *RVP8 User's Manual*
+de SIGMET (agosto de 2006, cap. 5 "Processing Algorithms") — no es el paper
+original, pero es la documentación pública del procesador de referencia de la
+industria (WSR-88D ORDA y la mayoría de radares operativos usan IRIS/RVP8 o un
+derivado), y expone las fórmulas cerradas que ese procesador realmente calcula.
+
+- **Velocidad.** El manual define `R1 = (1/(M-1))·Σ s'*_n·s'_{n+1}` (conjuga la
+  muestra *anterior*) y `V = (λ/4πτs)·arg(R1)`. Este repo calcula
+  `r1 = s_n·conj(s_{n+1})` (conjuga la *posterior*), es decir
+  `r1 = conj(R1_RVP8)`, así que `arg(r1) = -arg(R1_RVP8)`. Sustituyendo,
+  `V = -(λ/4πτs)·arg(r1)` — exactamente `PulsePairEstimate::velocity_mps`
+  (`crates/moments/src/pulse_pair.rs`). Coinciden en valor; sólo difiere la
+  convención de qué muestra se conjuga.
+- **Ancho espectral, algoritmo "rápido" R0,R1.** El manual da
+  `Var = -2·ln(SQI)` normalizada al intervalo de Nyquist `[-π,π]`, con
+  `W = √Var/π` (normalizado a `[-1,1]`) y por tanto, en unidades físicas,
+  `W_mps = (λ/4πτs)·√(-2·ln(SQI))`. Reescribiendo el coeficiente,
+  `(λ/4πτs)·√2 = λ/(2√2·π·τs)`, que es exactamente el coeficiente que usa
+  `pulse_pair_moments`: `wavelength_m/(2π·prt_s·√2) · √(-ln(ratio))`. La única
+  diferencia real es el denominador de `ratio`: el manual usa `SQI = |R1|/R0`
+  (con `R0` sin restar ruido, válido sólo cuando `SNR/(SNR+1) ≈ 1`, como el
+  propio manual aclara), mientras que este repo usa `|R1|/S` con `S` ya
+  corregido de ruido — una generalización que no exige SNR alto para ser
+  válida, no una fórmula distinta.
+- **SQI** coincide de forma literal (`|R1|/R0`, misma definición, ver
+  [índices de calidad](indices-de-calidad.md)). **CCOR** coincide en su forma
+  general (`10·log10(filtrada/total)`); el manual expone además una variante
+  algebraica en términos de `CSR` que este repo no reproduce porque no aporta
+  nada nuevo, es la misma cantidad. **SIG** persigue la misma cantidad física
+  (SNR tras clutter) pero por un camino algebraico distinto — el manual la
+  arma como `10·log10((T0−N)/N) + CCOR` sobre `T0`/`R0` sin filtrar
+  explícitamente el ruido primero; este repo la calcula directamente sobre
+  `s_linear` (ya filtrado de clutter y de ruido, aguas arriba). No son la
+  misma expresión algebraica, pero sí describen la misma cantidad si `S` (este
+  repo) y `R0−N` con la corrección de `CCOR` (RVP8) se calculan sobre la misma
+  serie ya filtrada.
+- **Hueco encontrado, no cerrado por este contraste**: el manual también
+  documenta un algoritmo "preciso" `R0,R1,R2` para el ancho espectral
+  (`Var = (2/3)·ln(|R1|/|R2|)`, válido a SNR bajo, 0–5 dB) que este repo **no
+  implementa** — `pulse_pair_moments` sólo calcula `R0` y `R1`. Queda como
+  ítem de roadmap aparte, no bloqueante (el algoritmo `R0,R1` ya cubierto es
+  el que el propio manual recomienda para SNR alto, el caso típico).
+
+Este contraste no reemplaza la varianza teórica de fase 4 — confirma que las
+fórmulas de punto (no de dispersión estadística) coinciden con las que usa un
+procesador de referencia de la industria.
+
 ## Coste de cómputo
 
 Un producto complejo y dos acumulaciones por muestra: O(M) por celda y canal, la
@@ -61,3 +114,4 @@ veces.
 - Zrnić, D. S. (1977), "Spectral Moment Estimates from Correlated Pulse Pairs", *IEEE Transactions on Aerospace and Electronic Systems*.
 - [Py-ART](https://github.com/ARM-DOE/pyart) — el módulo de lectura/procesamiento de momentos de Py-ART (ARM Radar Toolkit, NASA/DOE) implementa y documenta estimadores de momentos sobre datos de radar reales en Python, útil como referencia de validación numérica.
 - [LROSE / RadX](https://github.com/NCAR/lrose-core) (NCAR) — el motor de procesamiento de series temporales de LROSE incluye una implementación de referencia en C++ del estimador pulse-pair y del estimador espectral, con código abierto auditable.
+- SIGMET, Inc., *RVP8 User's Manual*, agosto de 2006, cap. 5 "Processing Algorithms" — documentación pública del procesador comercial de referencia; usado arriba para contraste algebraico de las fórmulas de velocidad y ancho espectral.

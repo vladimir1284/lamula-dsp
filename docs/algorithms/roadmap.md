@@ -593,6 +593,29 @@ página, que tampoco está modelada en este contrato. Sin promediado entre
 radial vigente en ese instante, no una traza acumulada — el plan no pide
 más que eso hoy.
 
+**Fase 4 (varianza teórica del pulse-pair) — intento fallido documentado, contraste alternativo cerrado.**
+El "Criterio de aceptación" de [pulse-pair](pulse-pair-moments.md) exige contrastar sesgo *y* desviación estándar
+contra la varianza teórica de Doviak & Zrnić cap. 6 en función de (SNR, σv, M) — sin acceso al texto en este entorno
+(bloqueado: ifremer, AMS journals y ResearchGate devolvieron 403 en todos los intentos, por curl y por WebFetch, con
+distintos user-agents). Se probaron tres reconstrucciones antes de rendirse: (1) una fórmula de alta-SNR/banda-estrecha
+pegada de una respuesta de otra IA resultó inconsistente consigo misma (no reduce a la fórmula "completa" pegada en el
+mismo mensaje al tomar SNR→∞); (2) esa fórmula "completa" (con ρ(T) y términos de SNR) sí es internamente consistente
+y reduce a `σv²/(2M)` en el límite banda-estrecha/alta-SNR — pero contrastada contra Monte Carlo sobre el modelo de
+covarianza gaussiano ya usado en este repo, se desvía hasta 4× en banda estrecha + alta SNR, porque es la fórmula de
+**pares independientes** (Miller & Rochwarger 1972), no la de **tren contiguo solapado** que implementa
+`pulse_pair_moments` (M-1 pares de retardo-1 de una misma ráfaga de M pulsos) — Zrnić (1977) dedica el paper entero a
+esa distinción; (3) una derivación propia de la varianza de `arg(R̂(1))` desde momentos de cuarto orden de gaussiana
+compleja circular (Isserlis/Wick) se desvió hasta 20× en la dirección contraria, señal de error de álgebra, no de
+modelo. El usuario aportó `5algor.pdf` (*RVP8 User's Manual*, SIGMET, agosto 2006) como material de respaldo —no es
+Doviak & Zrnić, pero sí confirma independientemente que las **fórmulas de punto** de velocidad y ancho espectral de
+este repo coinciden algebraicamente con las del procesador de referencia de la industria (ver
+[pulse-pair](pulse-pair-moments.md) §"Contraste cruzado contra SIGMET RVP8" y
+[índices de calidad](indices-de-calidad.md) §homónimo) — pero ese manual no deriva la varianza estadística del
+estimador en función de M/SNR, así que no cierra el hueco de fase 4. **Sigue abierto**: el criterio de aceptación de
+varianza teórica del pulse-pair necesita o bien acceso directo al capítulo 6 de Doviak & Zrnić / Zrnić (1977), o una
+derivación propia hecha con más cuidado del que permitió esta sesión (la corrección "tren contiguo" de Zrnić 1977 no
+es trivial). No hornear ningún margen de tolerancia numérico basado en las fórmulas descartadas arriba.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.

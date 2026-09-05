@@ -71,6 +71,18 @@ ruido puro debe converger a 0 con la dispersión esperada, y sobre un tono puro 
 razón de potencias antes y después del filtro en escenarios con clutter
 inyectado de potencia conocida. El SIG se valida junto con la resta de ruido.
 
+## Contraste cruzado contra SIGMET RVP8
+
+Ver [pulse-pair](pulse-pair-moments.md) §"Contraste cruzado contra SIGMET
+RVP8" para el detalle: SQI coincide de forma literal con la definición del
+*RVP8 User's Manual* (`|R(1)|/R(0)`); CCOR coincide en su forma general; SIG
+persigue la misma cantidad física (SNR tras clutter) por un camino algebraico
+distinto — el manual la arma sobre `R0`/`T0` sin filtrar, este repo la calcula
+directamente sobre la señal ya filtrada de clutter y ruido. Ninguno de los
+tres reemplaza el contraste de varianza teórica que pide el "Criterio de
+aceptación" de arriba, que sigue sin cerrar por falta de acceso al capítulo 6
+de Doviak & Zrnić en este entorno.
+
 ## Coste de cómputo
 
 Despreciable: los tres se derivan de cantidades que el estimador de momentos ya
