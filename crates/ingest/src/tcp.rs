@@ -21,15 +21,33 @@
 //! a mitad de un radial, la próxima trama tras la reconexión se sigue
 //! alimentando al ensamblador que ya tenía en curso; esto puede producir un
 //! radial corrupto — no hay lógica de resincronización en este workspace.
+//!
+//! **Camino de escritura (`Afc`, sentido `down`).** El socket aceptado se
+//! parte en mitad de lectura y mitad de escritura (`TcpStream::into_split`):
+//! la mitad de lectura sigue el bucle de arriba; la mitad de escritura la
+//! posee una tarea aparte que drena `IngestSource::afc` y le escribe
+//! [`crate::wire::encode_afc_frame`] tal cual llega. Las dos tareas comparten
+//! cuál es la mitad de escritura *vigente* a través de un
+//! `Arc<Mutex<Option<OwnedWriteHalf>>>` actualizado en cada `accept()` (y
+//! puesto a `None` al reconectar) porque el ciclo de vida de la escritura no
+//! sigue al bucle de lectura: una corrección de AFC puede necesitar salir
+//! aunque no haya llegado ningún `Ray` nuevo entretanto (el lazo de AFC
+//! corre a la cadencia de rayo, no a la de esta tarea). Sin conexión
+//! aceptada todavía, o tras un error de escritura, la corrección en curso se
+//! descarta — no hay cola de reintento; la próxima actualización del lazo de
+//! AFC (`docs/algorithms/burst-fase-afc.md` §"Lazo de AFC") la reemplaza.
 
-use lamula_contract::drx_dsp::{HEADER_SIZE, RAY_SIZE};
-use tokio::io::AsyncReadExt;
+use std::sync::Arc;
+
+use lamula_contract::drx_dsp::{Afc, HEADER_SIZE, RAY_SIZE};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, ToSocketAddrs};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::error::IngestError;
-use crate::wire::decode_ray_frame;
+use crate::wire::{decode_ray_frame, encode_afc_frame};
 use crate::IngestSource;
 
 /// Escucha en `addr`. Separado de [`spawn`] para que quien llama pueda leer
@@ -38,18 +56,48 @@ pub async fn bind(addr: impl ToSocketAddrs) -> Result<TcpListener, IngestError> 
     Ok(TcpListener::bind(addr).await?)
 }
 
-/// Acepta conexiones sobre `listener`, una detrás de otra, y decodifica cada
-/// trama que llegue. `full_scale_counts` como en
+/// Acepta conexiones sobre `listener`, una detrás de otra, decodifica cada
+/// trama `Ray` que llegue, y manda hacia el DRx cada `Afc` que llegue por
+/// `IngestSource::afc`. `full_scale_counts` como en
 /// `crate::wire::decode_ray_frame`. Ver el doc del módulo para la semántica
-/// de reconexión.
+/// de reconexión y de la mitad de escritura.
 pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> IngestSource {
     let (tx, rx) = mpsc::channel(capacity);
+    let (afc_tx, mut afc_rx) = mpsc::channel::<Afc>(capacity);
+    let write_half: Arc<Mutex<Option<OwnedWriteHalf>>> = Arc::new(Mutex::new(None));
+
+    // Tarea de escritura: vive tanto como `afc_tx` tenga algún emisor vivo
+    // (este `spawn`, y quien clone `IngestSource::afc`), independiente del
+    // ciclo accept/reconectar de la tarea de lectura de abajo.
+    {
+        let write_half = Arc::clone(&write_half);
+        tokio::spawn(async move {
+            while let Some(afc) = afc_rx.recv().await {
+                let frame = encode_afc_frame(&afc);
+                let mut guard = write_half.lock().await;
+                if let Some(w) = guard.as_mut() {
+                    if w.write_all(&frame).await.is_err() {
+                        // Escritura rota: la lectura del mismo socket lo
+                        // detectará por su cuenta (EOF/error) y reconectará;
+                        // aquí sólo se deja de intentar escribir a un socket
+                        // muerto hasta la próxima conexión.
+                        *guard = None;
+                    }
+                }
+                // Sin conexión aceptada todavía: se descarta en silencio,
+                // ver el doc del módulo.
+            }
+        });
+    }
+
     let task: JoinHandle<Result<(), IngestError>> = tokio::spawn(async move {
         loop {
-            let (mut socket, _peer) = listener.accept().await?;
+            let (socket, _peer) = listener.accept().await?;
+            let (mut read_half, w) = socket.into_split();
+            *write_half.lock().await = Some(w);
             loop {
                 let mut header = [0u8; HEADER_SIZE];
-                match socket.read_exact(&mut header).await {
+                match read_half.read_exact(&mut header).await {
                     Ok(_) => {}
                     // Cierre limpio del otro lado justo entre tramas: fin de
                     // esta conexión, no un fallo — vuelve a esperar la
@@ -57,12 +105,18 @@ pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> 
                     // mitad de cabecera) se propaga: no se traga un fallo
                     // real de socket como si fuera un cierre limpio.
                     Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                    Err(e) => return Err(e.into()),
+                    Err(e) => {
+                        *write_half.lock().await = None;
+                        return Err(e.into());
+                    }
                 }
                 let payload_len = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
 
                 let mut rest = vec![0u8; RAY_SIZE + payload_len];
-                socket.read_exact(&mut rest).await?;
+                if let Err(e) = read_half.read_exact(&mut rest).await {
+                    *write_half.lock().await = None;
+                    return Err(e.into());
+                }
 
                 let mut full_frame = Vec::with_capacity(HEADER_SIZE + rest.len());
                 full_frame.extend_from_slice(&header);
@@ -73,7 +127,12 @@ pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> 
                     return Ok(());
                 }
             }
+            *write_half.lock().await = None;
         }
     });
-    IngestSource { frames: rx, task }
+    IngestSource {
+        frames: rx,
+        afc: afc_tx,
+        task,
+    }
 }

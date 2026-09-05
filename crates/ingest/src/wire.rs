@@ -5,12 +5,67 @@
 //! `crates/simulator/tests/statistical.rs` (offsets de `Ray`, orden
 //! canal-más-rápido-que-bin del payload).
 
-use lamula_contract::drx_dsp::{HEADER_SIZE, MAGIC, RAY_SIZE, VERSION_MAJOR};
+use lamula_contract::drx_dsp::{
+    Afc, MsgType, AFC_SIZE, HEADER_SIZE, MAGIC, RAY_SIZE, VERSION_MAJOR, VERSION_MINOR,
+};
 use rustfft::num_complex::Complex64;
 
 use crate::error::IngestError;
 
 const MSG_TYPE_RAY: u8 = 1;
+
+/// Serializa un mensaje `Afc` (`DRx↔DSP`, sentido `down`) como cabecera de
+/// 12 B seguida de sus 16 B, sin carga variable — mismo formato que
+/// `lamula_simulator::pack_rays` usa para `Ray`, sentido inverso. `apply_at_seq`
+/// y `pad0` viajan tal como los trae `afc` (`0` = aplicar ya, por convención
+/// del contrato).
+pub fn encode_afc_frame(afc: &Afc) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(HEADER_SIZE + AFC_SIZE);
+    buf.extend_from_slice(&MAGIC.to_le_bytes());
+    buf.push(VERSION_MAJOR);
+    buf.push(VERSION_MINOR);
+    buf.push(MsgType::Afc as u8);
+    buf.push(0); // flags, reservado
+    buf.extend_from_slice(&(AFC_SIZE as u32).to_le_bytes());
+
+    buf.extend_from_slice(&afc.nco_phase_inc.to_le_bytes());
+    buf.extend_from_slice(&afc.apply_at_seq.to_le_bytes());
+    buf.extend_from_slice(&afc.pad0.to_le_bytes());
+    debug_assert_eq!(buf.len(), HEADER_SIZE + AFC_SIZE);
+    buf
+}
+
+#[cfg(test)]
+mod afc_encode_tests {
+    use super::*;
+
+    #[test]
+    fn encode_afc_frame_matches_header_and_payload_layout() {
+        let afc = Afc {
+            nco_phase_inc: 0x0102_0304_0506_0708,
+            apply_at_seq: 42,
+            pad0: 0,
+        };
+        let frame = encode_afc_frame(&afc);
+        let nco_phase_inc = afc.nco_phase_inc; // copia local: `Afc` es `packed`
+        let apply_at_seq = afc.apply_at_seq;
+        assert_eq!(frame.len(), HEADER_SIZE + AFC_SIZE);
+        assert_eq!(&frame[0..4], &MAGIC.to_le_bytes());
+        assert_eq!(frame[6], MsgType::Afc as u8);
+        assert_eq!(
+            u32::from_le_bytes(frame[8..12].try_into().unwrap()),
+            AFC_SIZE as u32
+        );
+        assert_eq!(
+            u64::from_le_bytes(frame[12..20].try_into().unwrap()),
+            nco_phase_inc
+        );
+        assert_eq!(
+            u32::from_le_bytes(frame[20..24].try_into().unwrap()),
+            apply_at_seq
+        );
+    }
+}
 
 /// Una trama `Ray` decodificada: un pulso, todas las celdas y canales.
 /// `channels[c][bin]` es la muestra compleja de ese canal en esa celda para

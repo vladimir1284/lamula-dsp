@@ -49,9 +49,25 @@
 //!   `config.burst_window_bins > 0` y el radial trae ese canal — prerrequisito
 //!   duro de cualquier estimador Doppler en magnetrón
 //!   (`docs/algorithms/burst-fase-afc.md`). El lazo de AFC
-//!   (`lamula_burst::AfcLoop`) NO está conectado: exigiría mandar el mensaje
-//!   `Afc` (`nco_phase_inc`) de vuelta al DRx, y `lamula_ingest` sólo tiene
-//!   camino de lectura sobre esa conexión hoy, no de escritura.
+//!   (`lamula_burst::AfcLoop`) SÍ está conectado: `lamula_ingest::tcp` ya
+//!   tiene camino de escritura (`IngestSource::afc`, ver su doc-comment) y
+//!   este binario lo alimenta una vez por radial con
+//!   `crate::ray::afc_burst_sample` (pulso 0, sólo instalación de magnetrón,
+//!   `config.burst_window_bins > 0`) `→` `AfcLoop::update` `→`
+//!   `lamula_burst::nco_phase_inc_for_freq_offset` `→` mensaje `Afc`. El lazo
+//!   se crea/recrea en `START` con la ganancia derivada de
+//!   `ServiceConfig::afc_tau_s` (`lamula_burst::loop_gain`, periodo de
+//!   actualización = duración nominal de un radial,
+//!   `n_pulses/prf_hz`) y se descarta en `STOP`/`ENTER_SETUP`, igual ciclo de
+//!   vida que `assembler`. **Sin verificar contra hardware real**:
+//!   `ServiceConfig::drx_nco_fs_hz`/`drx_nco_word_bits` (frecuencia de
+//!   referencia y anchura del acumulador de fase del NCO de recepción del
+//!   DRx) no vienen de ningún contrato de este repositorio — ver el
+//!   doc-comment de `lamula_burst::nco_phase_inc_for_freq_offset` y de
+//!   `crate::config::ServiceConfig`. El congelamiento/BITE que reporta
+//!   `AfcUpdate::bite` ante pérdida de burst no se publica en ningún sitio
+//!   todavía (no hay Status & BITE Manager en este workspace, ver más
+//!   abajo).
 //! - `SpectrumFrame.center_freq_hz`/`span_hz` quedan a 0: el contrato
 //!   `DRx↔DSP` no expone frecuencia de muestreo ni sintonía del NCO, y la
 //!   página del algoritmo (`docs/algorithms/analizador-espectro-fi.md`) deja
@@ -98,6 +114,8 @@
 mod config;
 mod ray;
 
+use lamula_burst::AfcLoop;
+use lamula_contract::drx_dsp::Afc;
 use lamula_contract::dsp_rcp::{
     command, dealias_mode, error as rcp_error, estimator, moment_kind, Capabilities, ConfigAck,
     SelftestResult, Status, VERSION_MAJOR, VERSION_MINOR,
@@ -145,6 +163,11 @@ async fn main() {
     // se reinicia junto con `assembler` porque emparejar con un radial de
     // antes de un `START`/config nuevo no tiene sentido físico.
     let mut previous_prf: Option<ray::PreviousPrf> = None;
+    // Lazo de AFC (`crate::ray::afc_burst_sample`, ver el doc-comment de
+    // `crate`): mismo ciclo de vida que `assembler`, se recrea en `START`
+    // (la ganancia depende de `prf_hz`/`n_pulses` vigentes) y se descarta en
+    // `STOP`/`ENTER_SETUP`.
+    let mut afc_loop: Option<AfcLoop> = None;
     let mut counters = Counters::default();
     let start = tokio::time::Instant::now();
     // Radial crudo más reciente (sin corrección de fase de burst), para que
@@ -185,6 +208,24 @@ async fn main() {
                         previous_prf = Some(next_previous_prf);
                         first_ray_after_config = false;
                         counters.rays_out += 1;
+                        if let Some(loop_) = afc_loop.as_mut() {
+                            if let Some(burst) = ray::afc_burst_sample(&radial, cfg_snapshot) {
+                                let update = loop_.update(&burst);
+                                let nco_phase_inc = lamula_burst::nco_phase_inc_for_freq_offset(
+                                    update.freq_hz,
+                                    cfg.drx_nco_fs_hz,
+                                    cfg.drx_nco_word_bits,
+                                );
+                                let _ = ingest
+                                    .afc
+                                    .send(Afc {
+                                        nco_phase_inc,
+                                        apply_at_seq: 0,
+                                        pad0: 0,
+                                    })
+                                    .await;
+                            }
+                        }
                         last_radial = Some(radial);
                         if up.send(msg).await.is_err() {
                             println!("RCP no admite más momentos (up cerrado)");
@@ -210,6 +251,8 @@ async fn main() {
                     &mut assembler,
                     &mut first_ray_after_config,
                     &mut previous_prf,
+                    &mut afc_loop,
+                    &cfg,
                     &counters,
                     start,
                     &last_radial,
@@ -245,6 +288,8 @@ async fn handle_down_message(
     assembler: &mut Option<RadialAssembler>,
     first_ray_after_config: &mut bool,
     previous_prf: &mut Option<ray::PreviousPrf>,
+    afc_loop: &mut Option<AfcLoop>,
+    svc_cfg: &ServiceConfig,
     counters: &Counters,
     start: tokio::time::Instant,
     last_radial: &Option<lamula_ingest::AssembledRadial>,
@@ -283,17 +328,28 @@ async fn handle_down_message(
             }
             match control.command {
                 command::START => {
-                    let n_pulses = session
+                    let applied = session
                         .config()
-                        .expect("Session::handle_command(START) ya exigió config aplicado")
-                        .n_pulses;
-                    *assembler = Some(RadialAssembler::new(n_pulses));
+                        .expect("Session::handle_command(START) ya exigió config aplicado");
+                    *assembler = Some(RadialAssembler::new(applied.n_pulses));
                     *first_ray_after_config = true;
                     *previous_prf = None;
+                    // Periodo de actualización del lazo = duración nominal
+                    // de un radial (`n_pulses/prf_hz`) — el lazo se
+                    // actualiza una vez por radial (`crate::ray::
+                    // afc_burst_sample`), no una vez por pulso.
+                    let update_period_s = applied.n_pulses as f64 / applied.prf_hz as f64;
+                    let gain = lamula_burst::loop_gain(update_period_s, svc_cfg.afc_tau_s);
+                    *afc_loop = Some(AfcLoop::new(
+                        gain,
+                        svc_cfg.afc_amp_threshold,
+                        ray::fast_time_dt_s(applied),
+                    ));
                 }
                 command::STOP | command::ENTER_SETUP => {
                     *assembler = None;
                     *previous_prf = None;
+                    *afc_loop = None;
                 }
                 command::REQUEST_STATUS => {
                     let status = build_status(session, counters, start);

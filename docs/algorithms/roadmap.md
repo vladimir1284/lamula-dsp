@@ -451,7 +451,8 @@ en `crates/service::ray` (banda C por defecto), mismo tipo de hueco sin
 campo propio en el contrato que `polarization_mode` — ver arriba.
 
 **Burst/AFC (`crates/burst`) → `crates/service::ray` — cerrado el hueco de
-contrato, cableada la corrección de fase; el lazo de AFC sigue sin cablear.**
+contrato, cableada la corrección de fase; el lazo de AFC ya cablea también (ver
+más abajo).**
 `crates/burst` (medida de fase/frecuencia del burst, corrección
 coherent-on-receive, lazo de AFC) estaba implementado y contrastado contra
 oráculo desde que se agregó el crate, pero no se podía cablear: `channel_mask`
@@ -501,11 +502,51 @@ radial sintético con fase aleatoria pulso a pulso inyectada por igual en eco
 y burst (como saldría del mismo pulso transmitido) — sin corregir, V no se
 acerca a v_true; corregido, sí. `cargo test --workspace` limpio.
 
-**Lo que esto NO resuelve**: el lazo de AFC (`lamula_burst::AfcLoop`) sigue
-sin cablear — exige mandar el mensaje `Afc` (`nco_phase_inc`) de vuelta al
-DRx, y `crates/ingest` sólo tiene camino de lectura sobre esa conexión hoy,
-no de escritura; es trabajo aparte, de infraestructura de transporte, no de
-algoritmo.
+**Lazo de AFC — cerrado, cableado de punta a punta; conversión Hz→palabra de
+NCO sin verificar contra hardware real.** El bloqueo que dejaba esto sin
+cablear era de transporte, no de algoritmo: `crates/ingest` sólo tenía camino
+de lectura sobre la conexión DRx. Se agregó camino de escritura a
+`crates/ingest::tcp` (`IngestSource::afc`, un canal `mpsc` drenado por una
+tarea aparte que escribe sobre la mitad de escritura vigente del socket
+aceptado — `TcpStream::into_split`, coordinada con la tarea de lectura vía
+`Arc<Mutex<Option<OwnedWriteHalf>>>`, ver el doc-comment del módulo) y
+`crates/ingest::wire::encode_afc_frame` (serialización del mensaje `Afc`,
+simétrica de `lamula_simulator::pack_rays` en sentido inverso); `simulator` y
+`udp` aceptan y descartan `afc` (no tienen DRx real del otro lado). Los
+adapters `simulator`/`udp` no cambian de comportamiento, sólo de forma —
+`cargo test --workspace` limpio.
+
+Con transporte resuelto, `crates/burst` gana
+`nco_phase_inc_for_freq_offset(freq_offset_hz, fs_hz, word_bits)`: la
+convención DDS estándar de acumulador de fase que espera `nco_phase_inc`
+(decisión D-02 del proyecto DRx, ver la página del algoritmo), parametrizada
+en `fs_hz`/`word_bits` en vez de fijarlos — **ninguno de los dos viene de
+ningún contrato de este repositorio**: ni `DRx↔DSP` ni `DSP↔RCP` exponen la
+frecuencia de referencia ni la anchura del acumulador de fase del NCO de
+recepción del DRx (`docs/dsp-plan.md` sólo documenta 250 MSPS como reloj del
+ADC, sin confirmar si el NCO deriva de ese mismo reloj). Se resolvió siguiendo
+el patrón ya establecido para huecos de este tipo (`ServiceConfig`, igual que
+`full_scale_counts`/la resolución del encoder SSI): dos variables de entorno
+nuevas y obligatorias, `LAMULA_DSP_DRX_NCO_FS_HZ`/`LAMULA_DSP_DRX_NCO_WORD_BITS`,
+sin valor por defecto inventado — bloquea confirmar la corrección real contra
+hardware DRx, no bloquea el resto del cableo. `crates/service::ray` gana
+`afc_burst_sample` (pulso 0 del canal de burst, gated por
+`MAGNETRON_TRANSMITTER` igual que `recover_trip1`) y `fast_time_dt_s` — este
+último SÍ con respaldo de contrato: se deriva de `config.gate_spacing_m`
+(`2·gate_spacing_m/c`), no de ninguna constante de reloj inventada.
+`crates/service::main` crea/recrea `AfcLoop` en `START` (ganancia vía
+`lamula_burst::loop_gain(n_pulses/prf_hz, afc_tau_s)`, con `afc_tau_s`/
+`afc_amp_threshold` como otro par de variables de entorno obligatorias del
+mismo tipo) y lo alimenta una vez por radial, mandando el `Afc` resultante por
+`ingest.afc`. El congelamiento/BITE de `AfcUpdate::bite` ante pérdida de burst
+no se publica en ningún sitio todavía — no hay Status & BITE Manager en este
+workspace, mismo alcance que ya declaraba `crate::main` para el resto de BITE.
+Tests: contraste puro de la conversión Hz→palabra en `crates/burst`
+(cuarto de vuelta, envuelto negativo, envuelto a escala completa), cableo del
+socket en `crates/ingest/tests/afc_write_path.rs` (llega tal cual antes de
+cualquier conexión se descarta en silencio), cableo de la extracción de
+muestra en `ray::tests::afc_burst_sample_*`. `cargo test --workspace`/
+`cargo clippy --all-targets -- -D warnings`/`cargo fmt --check` en verde.
 
 **`recover_trip1` de [dealiasing de rango](dealiasing-de-rango.md) — cerrado,
 sin llamar literalmente a la función del crate.** El bloqueo de contrato que

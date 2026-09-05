@@ -26,6 +26,10 @@ pub async fn bind(addr: impl ToSocketAddrs) -> Result<UdpSocket, IngestError> {
 /// en `crate::wire::decode_ray_frame`.
 pub fn spawn(socket: UdpSocket, full_scale_counts: i16, capacity: usize) -> IngestSource {
     let (tx, rx) = mpsc::channel(capacity);
+    // `IngestSource::afc` no tiene destino en un datagrama sin conexión de
+    // vuelta confirmada (v0.1, sin filtro de origen): se acepta y se
+    // descarta, igual que el adapter `simulator`.
+    let (afc_tx, _afc_rx) = mpsc::channel(1);
     let task: JoinHandle<Result<(), IngestError>> = tokio::spawn(async move {
         let mut buf = vec![0u8; MAX_DATAGRAM];
         loop {
@@ -40,5 +44,9 @@ pub fn spawn(socket: UdpSocket, full_scale_counts: i16, capacity: usize) -> Inge
             }
         }
     });
-    IngestSource { frames: rx, task }
+    IngestSource {
+        frames: rx,
+        afc: afc_tx,
+        task,
+    }
 }

@@ -266,6 +266,37 @@ const ZPHI_A_COEF_DB_PER_DEG: f64 = 0.08;
 /// que exista uno.
 const MAGNETRON_TRANSMITTER: bool = true;
 
+/// Muestra de burst del pulso 0 de este radial (canal
+/// `channel::TX_BURST_0`), para alimentar
+/// [`lamula_burst::AfcLoop::update`](lamula_burst::AfcLoop) una vez por
+/// radial: el lazo de AFC tiene constante de tiempo de segundos
+/// (`docs/algorithms/burst-fase-afc.md` §"Lazo de AFC"), muy por encima de un
+/// radial, así que un pulso alcanza — no hace falta promediar entre pulsos
+/// del mismo radial. `None` en las mismas condiciones que
+/// [`burst_phase_correct`] (`config.burst_window_bins == 0` o sin canal de
+/// burst en este radial) y, además, en transmisor coherente
+/// (`MAGNETRON_TRANSMITTER == false`): ahí el AFC se degrada a un ajuste
+/// lento o desaparece según la página del algoritmo, y este cableo inicial
+/// no cubre ese caso.
+pub fn afc_burst_sample(radial: &AssembledRadial, config: &Config) -> Option<Vec<Complex64>> {
+    if !MAGNETRON_TRANSMITTER || config.burst_window_bins == 0 {
+        return None;
+    }
+    radial.burst_window(channel::TX_BURST_0, 0, config.burst_window_bins as usize)
+}
+
+/// Periodo de muestreo en tiempo rápido dentro de la ventana de burst
+/// (`lamula_burst::burst_freq_estimate`, parámetro `dt_fast_s`). A
+/// diferencia de las constantes de arriba, esto SÍ tiene respaldo de
+/// contrato: el espaciado entre celdas de rango consecutivas
+/// (`config.gate_spacing_m`) es, por definición del tiempo de ida y vuelta
+/// de la luz, `2·gate_spacing_m/c` segundos de tiempo rápido — la misma
+/// relación que ya usa `unambiguous_range_m` en sentido inverso
+/// (`SPEED_OF_LIGHT_M_S * prt / 2`).
+pub fn fast_time_dt_s(config: &Config) -> f64 {
+    2.0 * config.gate_spacing_m as f64 / SPEED_OF_LIGHT_M_S
+}
+
 /// `(zdr, rhohv, phidp, kdp, phidp_unwrapped, ldr)` por celda, sólo con
 /// segundo canal — ver el doc-comment del módulo. `phidp_unwrapped` (grados,
 /// la misma serie que ya usa `kdp_window_fit`) se conserva aparte de `phidp`
@@ -2019,6 +2050,82 @@ mod tests {
             (corrected_v - V_TRUE).abs() < 1.0,
             "corregido, V ({corrected_v}) debería acercarse a v_true={V_TRUE}"
         );
+    }
+
+    #[test]
+    fn afc_burst_sample_reads_pulse_zero_of_the_burst_channel() {
+        // `channels[c][bin]` es la serie pulso a pulso de esa celda: cada
+        // bin del canal de burst lleva un solo pulso aquí.
+        let burst_ch = vec![
+            vec![Complex64::new(1.0, 0.0)],
+            vec![Complex64::new(2.0, 0.0)],
+            vec![Complex64::new(3.0, 0.0)],
+        ];
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: channel::RX_0 | channel::TX_BURST_0,
+            channels: vec![
+                vec![vec![Complex64::new(9.0, 9.0)]], // RX_0, un bin, un pulso
+                burst_ch,                             // TX_BURST_0, 3 bins, un pulso
+            ],
+            ray_flags: vec![0],
+            dropped_pulses: 0,
+        };
+        let config = Config {
+            burst_window_bins: 2,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+
+        let sample = afc_burst_sample(&radial, &config).expect("magnetrón con burst wireado");
+        assert_eq!(
+            sample,
+            vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)]
+        );
+    }
+
+    #[test]
+    fn afc_burst_sample_is_none_without_burst_window_configured() {
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: channel::RX_0 | channel::TX_BURST_0,
+            channels: vec![
+                vec![vec![Complex64::new(0.0, 0.0)]],
+                vec![vec![Complex64::new(1.0, 0.0)]],
+            ],
+            ray_flags: vec![0],
+            dropped_pulses: 0,
+        };
+        let config = Config {
+            burst_window_bins: 0,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        assert_eq!(afc_burst_sample(&radial, &config), None);
+    }
+
+    #[test]
+    fn fast_time_dt_s_matches_two_way_travel_time_of_the_gate_spacing() {
+        let config = Config {
+            gate_spacing_m: 150.0,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        let expected = 2.0 * 150.0 / SPEED_OF_LIGHT_M_S;
+        assert!((fast_time_dt_s(&config) - expected).abs() < 1e-15);
     }
 
     #[test]

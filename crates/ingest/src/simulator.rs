@@ -15,6 +15,10 @@ use crate::IngestSource;
 /// real: `send` espera si el consumidor no drena.
 pub fn spawn(frames: Vec<Vec<u8>>, full_scale_counts: i16, capacity: usize) -> IngestSource {
     let (tx, rx) = mpsc::channel::<RawPulseFrame>(capacity);
+    // Sin transporte real detrás: nadie drena este canal, así que un `send`
+    // sobre `IngestSource::afc` falla de inmediato en vez de bloquear (ver su
+    // doc-comment). Es intencional — este adapter no tiene DRx del otro lado.
+    let (afc_tx, _afc_rx) = mpsc::channel(1);
     let task: JoinHandle<Result<(), IngestError>> = tokio::spawn(async move {
         for raw in frames {
             let frame = decode_ray_frame(&raw, full_scale_counts)?;
@@ -24,5 +28,9 @@ pub fn spawn(frames: Vec<Vec<u8>>, full_scale_counts: i16, capacity: usize) -> I
         }
         Ok(())
     });
-    IngestSource { frames: rx, task }
+    IngestSource {
+        frames: rx,
+        afc: afc_tx,
+        task,
+    }
 }

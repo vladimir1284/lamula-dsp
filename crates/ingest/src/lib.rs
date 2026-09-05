@@ -40,11 +40,15 @@ mod wire;
 pub use angle::ssi_counts_to_deg;
 pub use assembly::{AssembledRadial, RadialAssembler};
 pub use error::IngestError;
-pub use wire::{decode_ray_frame, RawPulseFrame};
+pub use wire::{decode_ray_frame, encode_afc_frame, RawPulseFrame};
 
 /// Un adapter en marcha: tramas decodificadas en orden por `frames`, más el
-/// `task` en el que corre (para propagar errores o hacer `abort`/`await`).
+/// `task` en el que corre (para propagar errores o hacer `abort`/`await`), más
+/// `afc` para mandar correcciones `Afc` de vuelta al DRx (sólo tiene efecto
+/// sobre el adapter [`tcp`]; [`simulator`] y [`udp`] la aceptan y la
+/// descartan — ver el doc-comment de [`tcp::spawn`]).
 pub struct IngestSource {
     pub frames: tokio::sync::mpsc::Receiver<RawPulseFrame>,
+    pub afc: tokio::sync::mpsc::Sender<lamula_contract::drx_dsp::Afc>,
     pub task: tokio::task::JoinHandle<Result<(), IngestError>>,
 }
