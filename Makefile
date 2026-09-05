@@ -5,13 +5,14 @@
 #   make check   todo lo que corre el CI
 #   make gen     regenera el contrato DSP↔RCP desde su esquema
 #   make test    sólo los tests (Rust + Python + notebooks de oráculo)
+#   make bench   benchmarks de throughput (criterion); NO corre en CI todavía
 #   make fmt     formatea las fuentes propias de Rust
 #   make clean
 
 PY ?= python3
 CARGO ?= cargo
 
-.PHONY: check gen lint test test-rust test-py test-oracles fmt clean
+.PHONY: check gen lint test test-rust test-py test-oracles bench fmt clean
 
 gen:
 	$(PY) tools/gen_contract.py
@@ -41,6 +42,15 @@ test-oracles:
 		tools/oracles/*.ipynb > /dev/null
 
 test: test-rust test-py test-oracles
+
+# `docs/dsp-plan.md` §10: el compute de estimación de momentos, no el enlace
+# 1GbE, es la restricción firm-real-time — este benchmark es la semilla de
+# esa puerta (`crates/service/benches/moment_ray.rs`), no un gate de CI
+# todavía: no hay presupuesto de tiempo por radial declarado en este
+# repositorio contra el que fallar automáticamente (ver el doc-comment del
+# propio benchmark). Deliberadamente fuera de `check`.
+bench:
+	$(CARGO) bench --workspace
 
 # rustfmt sólo sobre las fuentes propias. `cargo fmt` a secas también vale
 # gracias al `rustfmt::skip` de la declaración del módulo vendorizado, pero

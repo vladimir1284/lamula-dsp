@@ -111,8 +111,10 @@
 //!   ningún sitio del repo (ver `lamula_ingest::angle`): se piden por
 //!   variable de entorno, sin valor por defecto inventado.
 
-mod config;
-mod ray;
+// `ray`/`config` viven en `src/lib.rs` (no como `mod` propio de este
+// binario) para que `benches/moment_ray.rs` pueda enlazarlos también — ver
+// el doc-comment de `lib.rs`. Mismo código, un solo lugar donde vive.
+use lamula_dsp_service::{config, ray};
 
 use lamula_burst::AfcLoop;
 use lamula_contract::drx_dsp::Afc;

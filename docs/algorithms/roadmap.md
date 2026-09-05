@@ -701,6 +701,23 @@ aleatoria en magnetrón (hoy ambas comparten el mismo bit `range_dealias`, ver l
 por el que el excitador recibe el patrón de fase a transmitir — trabajo de contrato e integración con DRx, no de
 algoritmo, y no emprendido en este cambio.
 
+**Fase 4 — semilla de la puerta de rendimiento (`crates/service/benches/moment_ray.rs`), no un gate de CI todavía.**
+`docs/dsp-plan.md` §10 pide "benchmark-regression gates (criterion) en los hot loops" porque el compute de estimación
+de momentos, no el enlace 1GbE, es la restricción firm-real-time (§4.3, §11). Hasta este cambio no existía ningún
+benchmark en el repositorio. Se agregó un target `criterion` sobre `build_moment_ray` — el hot path real, no un
+micro-benchmark de una sola etapa — con un radial dual-pol representativo (todos los momentos activos, filtro de
+clutter GMAP y RFI encendidos) a dos tamaños: 100 celdas de referencia y 1840 celdas (`docs/dsp-plan.md` §3.1, alcance
+máximo de reflectividad, 460 km a 250 m de espaciado). Requirió separar `crates/service` en biblioteca (`src/lib.rs`,
+`ray`/`config`) + binario delgado (`src/main.rs` ya no declara sus propios `mod`, usa la biblioteca): un target
+`[[bench]]` sólo puede enlazar contra un target de biblioteca, nunca contra `src/main.rs`. Medido en esta sesión (no
+el hardware objetivo, sin valor de referencia): ~1.45 ms/radial a 100 celdas, ~30.3 ms/radial a 1840 celdas, un único
+hilo. **Esto NO es un gate**: ningún documento de este repositorio fija un presupuesto de tiempo por radial (PRF
+máxima × celdas máximas no está cerrado, ver `docs/dsp-plan.md` §11), así que no hay umbral contra el que fallar
+automáticamente todavía, y la CPU/SBC objetivo del Fase 0 (§8.2) sigue sin decidirse — el número de esta sesión sólo
+sirve para detectar una regresión relativa entre dos ejecuciones en la misma máquina, no para certificar throughput
+real. `make bench` corre el benchmark; deliberadamente fuera de `make check`/CI hasta que exista ese presupuesto.
+`cargo build`/`cargo test --workspace`/`cargo clippy --all-targets -- -D warnings`/`cargo fmt --check` en verde.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.
