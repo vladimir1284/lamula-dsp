@@ -22,6 +22,20 @@
 //! alimentando al ensamblador que ya tenía en curso; esto puede producir un
 //! radial corrupto — no hay lógica de resincronización en este workspace.
 //!
+//! Una trama cuyos bytes se leen completos pero que `decode_ray_frame`
+//! rechaza (`BadMagic`/`UnsupportedVersion`/`UnexpectedMsgType`/`Truncated`)
+//! ya NO termina la tarea (antes de este cambio sí, vía `?` — un único
+//! `BadMagic` tumbaba el enlace entero, lo que hacía imposible ejercitar
+//! `docs/dsp-plan.md` §"fault injection ... for BITE testing" de punta a
+//! punta sin reconectar a mano). Se cuenta en `malformed_frames` y se sigue
+//! leyendo la próxima cabecera: el `read_exact` de arriba ya consumió del
+//! socket exactamente `HEADER_SIZE + RAY_SIZE + payload_len` bytes según el
+//! propio encabezado de esa trama, así que la sincronía de bytes para la
+//! siguiente trama no se pierde — salvo que la propia corrupción haya caído
+//! sobre `payload_len` (`FrameFault::PayloadLenTooLarge` en
+//! `lamula_simulator::fault`), caso que este adapter no intenta resincronizar
+//! (exigiría buscar `MAGIC` byte a byte en el flujo) y que sigue sin cubrir.
+//!
 //! **Camino de escritura (`Afc`, sentido `down`).** El socket aceptado se
 //! parte en mitad de lectura y mitad de escritura (`TcpStream::into_split`):
 //! la mitad de lectura sigue el bucle de arriba; la mitad de escritura la
@@ -37,6 +51,7 @@
 //! descarta — no hay cola de reintento; la próxima actualización del lazo de
 //! AFC (`docs/algorithms/burst-fase-afc.md` §"Lazo de AFC") la reemplaza.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use lamula_contract::drx_dsp::{Afc, HEADER_SIZE, RAY_SIZE};
@@ -65,6 +80,7 @@ pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> 
     let (tx, rx) = mpsc::channel(capacity);
     let (afc_tx, mut afc_rx) = mpsc::channel::<Afc>(capacity);
     let write_half: Arc<Mutex<Option<OwnedWriteHalf>>> = Arc::new(Mutex::new(None));
+    let malformed_frames = Arc::new(AtomicU64::new(0));
 
     // Tarea de escritura: vive tanto como `afc_tx` tenga algún emisor vivo
     // (este `spawn`, y quien clone `IngestSource::afc`), independiente del
@@ -90,49 +106,60 @@ pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> 
         });
     }
 
-    let task: JoinHandle<Result<(), IngestError>> = tokio::spawn(async move {
-        loop {
-            let (socket, _peer) = listener.accept().await?;
-            let (mut read_half, w) = socket.into_split();
-            *write_half.lock().await = Some(w);
+    let task: JoinHandle<Result<(), IngestError>> = {
+        let malformed_frames = Arc::clone(&malformed_frames);
+        tokio::spawn(async move {
             loop {
-                let mut header = [0u8; HEADER_SIZE];
-                match read_half.read_exact(&mut header).await {
-                    Ok(_) => {}
-                    // Cierre limpio del otro lado justo entre tramas: fin de
-                    // esta conexión, no un fallo — vuelve a esperar la
-                    // próxima. Cualquier otro error (reset, timeout, EOF a
-                    // mitad de cabecera) se propaga: no se traga un fallo
-                    // real de socket como si fuera un cierre limpio.
-                    Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-                    Err(e) => {
+                let (socket, _peer) = listener.accept().await?;
+                let (mut read_half, w) = socket.into_split();
+                *write_half.lock().await = Some(w);
+                loop {
+                    let mut header = [0u8; HEADER_SIZE];
+                    match read_half.read_exact(&mut header).await {
+                        Ok(_) => {}
+                        // Cierre limpio del otro lado justo entre tramas: fin
+                        // de esta conexión, no un fallo — vuelve a esperar la
+                        // próxima. Cualquier otro error (reset, timeout, EOF a
+                        // mitad de cabecera) se propaga: no se traga un fallo
+                        // real de socket como si fuera un cierre limpio.
+                        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                        Err(e) => {
+                            *write_half.lock().await = None;
+                            return Err(e.into());
+                        }
+                    }
+                    let payload_len =
+                        u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
+
+                    let mut rest = vec![0u8; RAY_SIZE + payload_len];
+                    if let Err(e) = read_half.read_exact(&mut rest).await {
                         *write_half.lock().await = None;
                         return Err(e.into());
                     }
-                }
-                let payload_len = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
 
-                let mut rest = vec![0u8; RAY_SIZE + payload_len];
-                if let Err(e) = read_half.read_exact(&mut rest).await {
-                    *write_half.lock().await = None;
-                    return Err(e.into());
-                }
+                    let mut full_frame = Vec::with_capacity(HEADER_SIZE + rest.len());
+                    full_frame.extend_from_slice(&header);
+                    full_frame.extend_from_slice(&rest);
 
-                let mut full_frame = Vec::with_capacity(HEADER_SIZE + rest.len());
-                full_frame.extend_from_slice(&header);
-                full_frame.extend_from_slice(&rest);
-
-                let frame = decode_ray_frame(&full_frame, full_scale_counts)?;
-                if tx.send(frame).await.is_err() {
-                    return Ok(());
+                    let frame = match decode_ray_frame(&full_frame, full_scale_counts) {
+                        Ok(f) => f,
+                        Err(_) => {
+                            malformed_frames.fetch_add(1, Ordering::Relaxed);
+                            continue;
+                        }
+                    };
+                    if tx.send(frame).await.is_err() {
+                        return Ok(());
+                    }
                 }
+                *write_half.lock().await = None;
             }
-            *write_half.lock().await = None;
-        }
-    });
+        })
+    };
     IngestSource {
         frames: rx,
         afc: afc_tx,
         task,
+        malformed_frames,
     }
 }

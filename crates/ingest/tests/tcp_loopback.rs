@@ -135,3 +135,93 @@ async fn reconnects_after_client_disconnects() {
 
     source.task.abort();
 }
+
+#[tokio::test]
+async fn malformed_frame_is_counted_and_does_not_kill_the_connection() {
+    // Antes de `crates/ingest::tcp` contar y descartar en vez de propagar el
+    // error de `decode_ray_frame` (ver su doc-comment), una sola trama con
+    // `BadMagic` tumbaba la tarea entera y ninguna trama posterior, aunque
+    // válida, llegaba nunca — lo que hacía imposible ejercitar
+    // `docs/dsp-plan.md` §"fault injection ... for BITE testing" sin
+    // reconectar a mano tras cada fallo inyectado.
+    use lamula_simulator::{corrupt_frame, FrameFault};
+
+    const BINS: usize = 1;
+    const M: usize = 4;
+    let params = CellParams {
+        power_s: 1.0,
+        mean_v: 1.0,
+        sigma_v: 0.5,
+        wavelength_m: 0.10,
+        prt_s: 1.0e-3,
+        m: M,
+        noise_floor: 0.0,
+    };
+    let mut rng = StdRng::seed_from_u64(11);
+    let cells: Vec<_> = (0..BINS)
+        .map(|_| generate_cell(&params, &mut rng))
+        .collect();
+    let fields = RayHeaderFields {
+        seq_start: 0,
+        timestamp_ns_start: 0,
+        timestamp_step_ns: 1,
+        trigger_count_start: 0,
+        azimuth_raw: 0,
+        elevation_raw: 0,
+        prf_div: 4,
+        pulse_width_idx: 0,
+        pulse_mode: 0,
+        cell_mode: 0,
+        channel_mask: 0b0001,
+        ray_flags: 0,
+    };
+    let wire_frames = pack_rays(&fields, &[cells], FULL_SCALE);
+    let good = wire_frames[0].clone();
+    let corrupted = corrupt_frame(&wire_frames[0], FrameFault::BadMagic);
+
+    let listener = lamula_ingest::tcp::bind("127.0.0.1:0").await.unwrap();
+    let local_addr = listener.local_addr().unwrap();
+    let mut source = lamula_ingest::tcp::spawn(listener, FULL_SCALE, 16);
+
+    let mut client = TcpStream::connect(local_addr).await.unwrap();
+    client.write_all(&corrupted).await.unwrap();
+    client.write_all(&good).await.unwrap();
+    client.write_all(&good).await.unwrap();
+
+    let got = source
+        .frames
+        .recv()
+        .await
+        .expect("la trama válida tras la corrupta debe seguir llegando");
+    assert_eq!(got, decode_ray_frame(&good, FULL_SCALE).unwrap());
+    let got2 = source
+        .frames
+        .recv()
+        .await
+        .expect("y la siguiente también, la conexión no debe haber muerto");
+    assert_eq!(got2, decode_ray_frame(&good, FULL_SCALE).unwrap());
+
+    // Puede tardar un instante en incrementarse respecto al `recv` de arriba
+    // (la cuenta ocurre antes de mandar por el canal, así que en la práctica
+    // ya está lista, pero no hay garantía de orden entre hilos sin sincronía
+    // explícita) — se sondea con un timeout corto en vez de asumir.
+    tokio::time::timeout(std::time::Duration::from_millis(200), async {
+        while source
+            .malformed_frames
+            .load(std::sync::atomic::Ordering::Relaxed)
+            < 1
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("malformed_frames debería llegar a 1");
+    assert_eq!(
+        source
+            .malformed_frames
+            .load(std::sync::atomic::Ordering::Relaxed),
+        1
+    );
+
+    source.task.abort();
+}

@@ -47,8 +47,17 @@ pub use wire::{decode_ray_frame, encode_afc_frame, RawPulseFrame};
 /// `afc` para mandar correcciones `Afc` de vuelta al DRx (sólo tiene efecto
 /// sobre el adapter [`tcp`]; [`simulator`] y [`udp`] la aceptan y la
 /// descartan — ver el doc-comment de [`tcp::spawn`]).
+///
+/// `malformed_frames`: cuenta tramas que `decode_ray_frame` rechazó
+/// (`BadMagic`/`UnsupportedVersion`/`UnexpectedMsgType`/`Truncated`) y que
+/// los tres adapters ahora descartan y siguen, en vez de terminar `task` —
+/// ver el doc-comment de [`tcp::spawn`] para el razonamiento de por qué
+/// descartar preserva la sincronía de bytes. Sin Status & BITE Manager en
+/// este workspace (ver el doc-comment del módulo), este contador es todo lo
+/// que expone hoy este crate; publicarlo hacia el RCP es trabajo aparte.
 pub struct IngestSource {
     pub frames: tokio::sync::mpsc::Receiver<RawPulseFrame>,
     pub afc: tokio::sync::mpsc::Sender<lamula_contract::drx_dsp::Afc>,
     pub task: tokio::task::JoinHandle<Result<(), IngestError>>,
+    pub malformed_frames: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }

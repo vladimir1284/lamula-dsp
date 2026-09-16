@@ -767,11 +767,55 @@ dev-dependencies con `crates/ingest` (que ya depende de `lamula-simulator` en su
 soportado por Cargo. `cargo test --workspace`/`cargo clippy --all-targets -- -D warnings`/`cargo fmt --check` en
 verde.
 
-**Lo que esto NO resuelve**: nada consume estos generadores todavía desde un escenario de BITE guionado de punta a
-punta (el plan pide "scripted weather/clutter/noise scenarios" — este cambio da las piezas, no un guion armado); el
-registro de fidelidad simulador-vs-real (§10 "Simulator-fidelity register") sigue sin existir; y clutter/multi-trip/RFI
-narrowband/polarización alternante siguen fuera de alcance del simulador (mismo estado que antes de este cambio, ver
-el doc-comment de `crate`).
+**Lo que esto NO resuelve (a la fecha de este cambio)**: nada consume estos generadores todavía desde un escenario de
+BITE guionado de punta a punta (el plan pide "scripted weather/clutter/noise scenarios" — este cambio da las piezas,
+no un guion armado); el registro de fidelidad simulador-vs-real (§10 "Simulator-fidelity register") sigue sin existir;
+y clutter/multi-trip/RFI narrowband/polarización alternante siguen fuera de alcance del simulador (mismo estado que
+antes de este cambio, ver el doc-comment de `crate`). **Actualizado más abajo**: el primer punto ya no aplica, ver
+"Escenario guionado de BITE de punta a punta".
+
+**Fase 4 — escenario guionado de BITE de punta a punta, y un hallazgo real al construirlo: los tres adapters de
+`crates/ingest` morían ante una sola trama malformada.** Al intentar cablear el primer guion (`docs/dsp-plan.md`
+§"fault injection ... for BITE testing", el hueco que dejó abierto el ítem anterior) con
+`lamula_simulator::fault::corrupt_frame` alimentando `lamula_ingest::simulator::spawn`, apareció un bug de
+robustez preexistente, no introducido por este cambio: `tcp::spawn`/`udp::spawn`/`simulator::spawn` propagaban el
+`Result` de `decode_ray_frame` con `?`, así que una sola trama rechazada (`BadMagic`/`UnsupportedVersion`/
+`UnexpectedMsgType`/`Truncated`) terminaba la tarea de ingesta entera — imposible ejercitar "fault injection... for
+BITE testing" de punta a punta sin reconectar a mano después de cada falla inyectada, y en producción, una única
+trama corrupta del DRx habría tumbado el enlace completo en vez de degradar una celda. Corregido en los tres
+adapters: la trama rechazada se cuenta en el campo nuevo `IngestSource::malformed_frames`
+(`Arc<AtomicU64>`, mismo patrón que `dropped_pulses` de `RadialAssembler` pero una capa antes, sin Status & BITE
+Manager que lo publique todavía, ver el doc-comment de `crates/ingest`) y se descarta sin terminar la tarea. En TCP
+esto es seguro porque el `read_exact` ya consumió del socket exactamente los bytes que el propio encabezado de esa
+trama declaraba antes de intentar decodificarla, así que la sincronía de bytes para la trama siguiente no se pierde
+— salvo que la corrupción caiga sobre el propio `payload_len` (`FrameFault::PayloadLenTooLarge`), caso que sigue sin
+cubrirse (exigiría resincronizar buscando `MAGIC` byte a byte, no emprendido). En UDP y en el adapter `simulator` no
+hay siquiera esa sutileza: un datagrama/entrada de lista es una unidad ya delimitada.
+
+Con eso resuelto, `crates/ingest/tests/bite_scenario.rs` guiona una sola ráfaga con las tres categorías de falla a la
+vez — una trama `BadMagic`, un pulso descartado (`drop_rays`) y un glitch de encoder (`inject_encoder_glitch`) sobre
+uno que sobrevive — corriendo por el camino real (`simulator::spawn` → `RadialAssembler` → `pulse_pair_moments`,
+misma columna vertebral que `tests/vertical_slice.rs`). Criterio de aceptación deliberadamente modesto, mismo
+espíritu que `crates/service/tests/soak.rs` ("no sale infinito", no "el valor es exacto por dígito"): el radial se
+completa sin pánico con exactamente las muestras que sobrevivieron, `malformed_frames` y `dropped_pulses` cuentan
+las tres fallas correctamente (`dropped_pulses` no distingue "corrupta" de "descartada" — para `RadialAssembler` las
+dos son igual de invisibles, un hueco de `seq`), el glitch de encoder llega intacto hasta el radial (filtrarlo es
+trabajo de una capa de BITE que no existe en este workspace), y la velocidad estimada sobre la serie con dos huecos
+sin rellenar sigue siendo un número finito dentro del rango de Nyquist, no basura. **Deliberadamente no incluido**:
+una curva de exactitud real de momentos-bajo-falla-inyectada (sesgo en función de posición/tipo de falla) — eso es
+trabajo de oráculo aparte, y su tolerancia se dejó deliberadamente floja (rango de Nyquist, no un margen ajustado)
+para no hornear un número sin poder contrastarlo, mismo principio que la fase 4 ya aplicó al abandonar la varianza
+teórica de pulse-pair sin acceso al capítulo 6. **Verificado en sesión posterior, una vez reparado el toolchain Rust
+del entorno** (rustup tenía instalado por error un toolchain `x86_64-unknown-linux-gnu` en un host `aarch64` real sin
+qemu; reinstalado nativo): `cargo build`/`cargo test --workspace`/`cargo clippy --all-targets -- -D warnings`/
+`cargo fmt --check` en verde, incluido `bite_scenario.rs`.
+
+**Lo que esto sigue sin resolver**: el registro de fidelidad simulador-vs-real y la cobertura de
+clutter/multi-trip/RFI narrowband/polarización alternante en el simulador, exactamente igual que antes (ver arriba);
+y drift de frecuencia (`lamula_simulator::burst::drifting_phase_sequence`) sigue sin tener su propio escenario
+guionado — este cambio cubrió las tres categorías del párrafo original de fault injection (tramas malformadas,
+pulsos perdidos, glitch de encoder), no la cuarta (deriva de frecuencia/AFC), que por su propia naturaleza necesita
+varios radiales sucesivos para observarse converger, no uno solo.
 
 **Fase 4 — semilla de endurance/soak (`crates/service/tests/soak.rs`), no el soak real que pide el plan.**
 `docs/dsp-plan.md` §10 pide "endurance/soak runs (long unattended processing at worst-case PRF/range)" en fase 4. No
