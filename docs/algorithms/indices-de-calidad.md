@@ -54,6 +54,20 @@ canal único. En configuración polarimétrica se calculan sobre el canal copola
 horizontal por convenio; con recepción alternante, sobre la serie del canal que
 corresponda al momento que se está censurando.
 
+Los tres son también independientes de `estimator`: se calculan siempre sobre
+`R(0)`/`R(1)` de la autocovarianza pulse-pair de la serie cruda (o filtrada,
+para CCOR), nunca sobre `SpectralEstimate::power_linear` del
+[estimador espectral](estimador-espectral.md) aunque sea ése el que fije UZ/CZ/V
+publicados. No es un hueco pendiente de fórmula, es la elección correcta: SQI
+mide la coherencia de la *serie*, no del algoritmo que luego la convierte en
+velocidad, así que definir un "SQI espectral" en términos de la potencia del
+lóbulo principal recortado (`DROP_DB`, semiancho máximo, ver el estimador
+espectral) filtraría el umbral interno del estimador — parámetros de
+implementación, no del contrato — dentro de un índice de calidad publicado; el
+mismo eco físico daría SQI distinto sólo por cambiar `config.estimator`, y
+`sqi_threshold` dejaría de significar lo mismo entre modos. Cableado así en
+`crates/service::ray::gate_quality`.
+
 ## Parámetros del contrato que consume
 
 Publica los momentos `sqi`, `ccor` y `sig` del enum `moment_kind`. Consume de

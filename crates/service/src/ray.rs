@@ -469,11 +469,15 @@ struct GateQuality {
 /// potencia que UZ/CZ terminan publicando — ver el doc-comment junto al
 /// cálculo de `primary_power_linear`/`primary_velocity_mps` en
 /// [`build_moment_ray`]). SQI y SIG siguen atados a `e` (autocovarianza
-/// pulse-pair) porque `lamula_quality::sqi`/`sig_db` no tienen definición
-/// espectral en este repo — **inferencia mía sin respaldo de oráculo**: ni
-/// la página del estimador espectral ni su oráculo dicen qué pasa con SQI
-/// cuando `estimator = spectral`, sólo que "los umbrales de censura actúan
-/// igual que con el estimador primario".
+/// pulse-pair) sea cual sea `config.estimator` — decisión cerrada, no
+/// inferencia pendiente, ver `docs/algorithms/indices-de-calidad.md`
+/// §"Configuraciones cubiertas" y `docs/algorithms/roadmap.md`
+/// §"Decisiones cerradas": los tres índices caracterizan la serie
+/// cruda/filtrada, no el algoritmo que decide la velocidad/potencia
+/// publicada, y definir un "SQI espectral" filtraría un parámetro interno
+/// de `crates/spectral` (`DROP_DB`/semiancho máximo) dentro de un índice de
+/// calidad del contrato, rompiendo que `sqi_threshold`/`sig_threshold`
+/// signifiquen lo mismo entre modos.
 fn gate_quality(power_linear: f64, e: &PulsePairEstimate, config: &Config) -> GateQuality {
     let uz_db = if power_linear > 0.0 {
         10.0 * power_linear.log10()

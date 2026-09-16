@@ -121,14 +121,17 @@ del burst, corrección coherent-on-receive, lazo de AFC con congelamiento y
 BITE) — completando así toda la fase 1 del plan de trabajo salvo el
 ensamblado final de radial. En fase 2, están hechos el paso 2 y el paso 3
 para [pulse-pair](pulse-pair-moments.md) (`crates/moments`: potencia,
-velocidad y ancho espectral; el estimador espectral como modo alternativo
-queda pendiente) y para [índices de calidad](indices-de-calidad.md)
+velocidad y ancho espectral) y para [índices de calidad](indices-de-calidad.md)
 (`crates/quality`: SQI, CCOR y SIG) y para
 [estimador espectral](estimador-espectral.md) (`crates/spectral`:
 periodograma con ventana de Hann, recorte de línea principal y recentrado
 circular; el oráculo documenta que su varianza de velocidad no iguala al
 pulse-pair en modo unimodal, y que su valor real está en aislar el modo
-dominante en escenarios bimodales) y para
+dominante en escenarios bimodales — cableado en `crates/service::ray` como
+selector de `estimator = spectral` para UZ/CZ/V, con fallback a la fase
+pulse-pair en celdas censuradas; SQI/SIG siguen calculados sobre la
+autocovarianza pulse-pair en este modo, inferencia sin respaldo de oráculo,
+ver el doc-comment de `gate_quality`) y para
 [GMAP](gmap-clutter-filtering.md) y
 [mapas de clutter](mapas-de-clutter.md) (`crates/clutter`: notch, GMAP con
 ajuste gaussiano por mínimos cuadrados y degradación explícita a notch, y el
@@ -425,6 +428,26 @@ tests de `crates/rcp-link`/`crates/service`). Verificado: `cargo build
 — a diferencia del cambio anterior, esta vez sí había `cargo` disponible en
 el entorno. El campo sólo se declara; `ldr_db` sigue sin cablearse en
 `crates/service::ray` porque eso depende de (1), no de este campo.
+
+**SQI/CCOR/SIG bajo `estimator = spectral` — cerrada: quedan atados a la
+autocovarianza pulse-pair siempre, no a `SpectralEstimate`, sin fórmula
+espectral nueva.** `crates/service::ray::gate_quality` marcaba esto como
+"inferencia mía sin respaldo de oráculo" desde el cableo del estimador
+espectral (`b8bcda9`). Revisado sin acceso a `cargo`/`jupyter` en este
+entorno — lo que descarta derivar y validar una fórmula espectral nueva de
+la misma forma que fase 4 ya renunció a improvisar la varianza teórica de
+pulse-pair sin poder contrastarla — se concluye que no hace falta fórmula
+nueva: los tres índices caracterizan la serie cruda/filtrada (coherencia a
+retardo 1, SNR, razón de filtrado), no el algoritmo que luego decide
+velocidad/potencia publicadas. Definir un "SQI espectral" en términos de la
+potencia del lóbulo principal recortado filtraría un parámetro interno del
+estimador (`DROP_DB`/semiancho máximo de `crates/spectral`) dentro de un
+índice de calidad del contrato — el mismo eco cambiaría de SQI sólo por
+cambiar `config.estimator`, rompiendo la invariancia que
+`sqi_threshold`/`sig_threshold` necesitan para significar lo mismo entre
+modos. Ver [índices de calidad](indices-de-calidad.md) §"Configuraciones
+cubiertas". Cambio de sólo documentación/comentarios, ningún cambio de
+lógica en `crates/service::ray`.
 
 **Qué significa exactamente CZ — cerrada: se expande a incluir corrección de
 atenuación. Implementada.** Por herencia de Vesta/Sigmet, CZ era hasta ahora
