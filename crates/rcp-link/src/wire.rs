@@ -368,7 +368,7 @@ fn decode_config_body(body: &[u8]) -> Result<Config, RcpLinkError> {
         sweep_mode: body[14],
         estimator: body[15],
         rfi_filter: body[16],
-        range_dealias: body[17],
+        range_dealias_mode: body[17],
         prf_ratio_num: body[18],
         prf_ratio_den: body[19],
         start_range_m: f32::from_le_bytes(body[20..24].try_into().unwrap()),

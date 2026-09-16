@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 2
+version_minor = 3
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -303,7 +303,7 @@ fields = [
   { name = "sweep_mode", type = "u8", doc = "Modo de barrido. Ver la enumeración." },
   { name = "estimator", type = "u8", doc = "Estimador de momentos. Ver la enumeración." },
   { name = "rfi_filter", type = "u8", doc = "Filtrado de interferencia de banda estrecha: 0 no, 1 sí." },
-  { name = "range_dealias", type = "u8", doc = "Recuperación de trip múltiple: 0 no, 1 sí." },
+  { name = "range_dealias_mode", type = "u8", doc = "Método de recuperación/detección de trip múltiple. Ver la enumeración `range_dealias_mode`." },
   { name = "prf_ratio_num", type = "u8", doc = "Numerador de la razón dual-PRF; 0 si no aplica." },
   { name = "prf_ratio_den", type = "u8", doc = "Denominador de la razón dual-PRF; 0 si no aplica." },
   { name = "start_range_m", type = "f32", doc = "Rango de la primera celda, metros." },
@@ -470,6 +470,21 @@ values = [
 ]
 
 [[enum]]
+name = "range_dealias_mode"
+type = "u8"
+doc = """Método de recuperación/detección de segundo trip
+(`docs/algorithms/roadmap.md` §"Decisiones cerradas" ítem "`range_dealias`
+sin SZ"). v0.2 lo declaraba con un solo bit booleano; v0.3 lo convierte en
+enumeración para poder distinguir la vía SZ(8/64) (klistrón) de la vía
+histórica de fase aleatoria (magnetrón) sin cambiar tamaño ni posición del
+campo — `0`/`1` conservan el significado que ya tenían."""
+values = [
+  { name = "none", value = 0, doc = "Sin recuperación de trip múltiple; sólo se procesa el primer trip." },
+  { name = "random_phase", value = 1, doc = "Detección y marcado cross-radial (`crates/service::ray`); recuperación real sólo en instalación magnetrón, vía la fase de burst aleatoria pulso a pulso (`lamula_range_dealias`)." },
+  { name = "sz_8_64", value = 2, doc = "Recuperación por codificación de fase SZ(8/64) (`docs/algorithms/sz-second-trip-recovery.md`, `crates/sz864`); exige transmisor con fase programable pulso a pulso (klistrón/TWT/estado sólido) y `capability_flag::sz864`. Sin cablear en `crates/service::ray` todavía." },
+]
+
+[[enum]]
 name = "polarization_mode"
 type = "u8"
 doc = """Modo del segundo canal de recepción, cuando `n_rx_channels > 1`
@@ -528,10 +543,11 @@ values = [
   { name = "spectral_estimator", value = 2, doc = "Estimador espectral disponible." },
   { name = "dual_prf", value = 4, doc = "Dealiasing dual-PRF disponible." },
   { name = "staggered_prt", value = 8, doc = "Dealiasing por PRT escalonado disponible." },
-  { name = "range_dealias", value = 16, doc = "Recuperación de trip múltiple disponible." },
+  { name = "range_dealias", value = 16, doc = "Recuperación/detección de trip múltiple por fase aleatoria (magnetrón) disponible. Ver `range_dealias_mode::random_phase`." },
   { name = "rfi_filter", value = 32, doc = "Filtrado de interferencia de banda estrecha disponible." },
   { name = "spectrum_feed", value = 64, doc = "Analizador de espectro de FI disponible." },
   { name = "iq_archive", value = 128, doc = "Volcado de series temporales crudas disponible." },
+  { name = "sz864", value = 256, doc = "Recuperación de trip múltiple por codificación de fase SZ(8/64) disponible (exige klistrón/TWT/estado sólido con fase programable). Ver `range_dealias_mode::sz_8_64`." },
 ]
 
 [[enum]]

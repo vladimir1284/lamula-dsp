@@ -31,7 +31,7 @@
 //!   (`lamula_rcp_link::validate::validate_config`). No hay CCOR porque no
 //!   hay filtro de clutter conectado a este binario (el crate
 //!   `lamula-clutter` existe en el workspace, pero no está wireado aquí).
-//!   Dealiasing de rango (`config.range_dealias`) sólo tiene conectado el
+//!   Dealiasing de rango (`config.range_dealias_mode`) sólo tiene conectado el
 //!   nivel "detección y marcado" (`crate::ray`, cross-radial vía
 //!   `PreviousPrf`, inferencia sin respaldo de oráculo — ver su
 //!   doc-comment); NO usa `classify_trip` de `lamula-range-dealias`, que
@@ -42,7 +42,11 @@
 //!   TX_BURST_0`, `contract/schema/drx_dsp_v0_1.toml` v0.3) y
 //!   `crate::ray::burst_phase_correct` la usa para coherent-on-receive, pero
 //!   nadie llama a `recover_trip1` con ella todavía — trabajo aparte, no
-//!   bloqueado por contrato como antes.
+//!   bloqueado por contrato como antes. `range_dealias_mode` distingue desde
+//!   v0.3 esta vía (`RANDOM_PHASE`) de `SZ_8_64` (klistrón,
+//!   `docs/algorithms/sz-second-trip-recovery.md`, `crates/sz864`); un
+//!   `config` con `SZ_8_64` no entra en el bloque de detección de
+//!   `crate::ray` — sigue sin cablear, ver su doc-comment.
 //!   Coherent-on-receive (`crate::ray::burst_phase_correct`) sí está
 //!   conectado: corrige la fase de todo canal que no sea `TX_BURST_0` con
 //!   `lamula_burst::{burst_phase_estimate, correct_phase}` cuando

@@ -83,7 +83,7 @@ fn worst_case_config(n_gates: u16, n_pulses: u16) -> Config {
         sweep_mode: 0,
         estimator: estimator::PULSE_PAIR,
         rfi_filter: 1,
-        range_dealias: 0,
+        range_dealias_mode: 0,
         prf_ratio_num: 0,
         prf_ratio_den: 0,
         start_range_m: 0.0,

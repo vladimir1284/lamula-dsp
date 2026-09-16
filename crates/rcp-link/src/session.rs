@@ -145,7 +145,7 @@ mod tests {
             sweep_mode: sweep_mode::PPI,
             estimator: estimator::PULSE_PAIR,
             rfi_filter: 0,
-            range_dealias: 0,
+            range_dealias_mode: 0,
             prf_ratio_num: 0,
             prf_ratio_den: 0,
             start_range_m: 0.0,

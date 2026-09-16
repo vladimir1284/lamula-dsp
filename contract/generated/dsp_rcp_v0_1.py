@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v1.2 — lado RCP y
+Contrato DSP↔RCP v1.3 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 1
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 
 @dataclass
 class Header:
@@ -286,7 +286,7 @@ class Config:
 
     FORMAT = "<IIHHBBBBBBBBfffffffffffffffBBH"
     SIZE = 84
-    FIELDS = ("seq", "moment_mask", "n_pulses", "n_gates", "clutter_filter", "dealias_mode", "sweep_mode", "estimator", "rfi_filter", "range_dealias", "prf_ratio_num", "prf_ratio_den", "start_range_m", "gate_spacing_m", "prf_hz", "sqi_threshold", "sig_threshold", "ccor_threshold", "log_threshold", "clutter_width_ms", "radar_constant_db", "noise_floor_dbm", "receiver_gain_db", "zdr_offset_db", "phidp_offset_deg", "antenna_isolation_db", "wavelength_m", "polarization_mode", "pad0", "burst_window_bins",)
+    FIELDS = ("seq", "moment_mask", "n_pulses", "n_gates", "clutter_filter", "dealias_mode", "sweep_mode", "estimator", "rfi_filter", "range_dealias_mode", "prf_ratio_num", "prf_ratio_den", "start_range_m", "gate_spacing_m", "prf_hz", "sqi_threshold", "sig_threshold", "ccor_threshold", "log_threshold", "clutter_width_ms", "radar_constant_db", "noise_floor_dbm", "receiver_gain_db", "zdr_offset_db", "phidp_offset_deg", "antenna_isolation_db", "wavelength_m", "polarization_mode", "pad0", "burst_window_bins",)
 
     seq: int = 0
     moment_mask: int = 0
@@ -297,7 +297,7 @@ class Config:
     sweep_mode: int = 0
     estimator: int = 0
     rfi_filter: int = 0
-    range_dealias: int = 0
+    range_dealias_mode: int = 0
     prf_ratio_num: int = 0
     prf_ratio_den: int = 0
     start_range_m: float = 0.0
@@ -454,6 +454,13 @@ class DealiasMode:
     DUAL_PRF = 1
     STAGGERED_PRT = 2
 
+class RangeDealiasMode:
+    """Método de recuperación/detección de segundo trip"""
+
+    NONE = 0
+    RANDOM_PHASE = 1
+    SZ_8_64 = 2
+
 class PolarizationMode:
     """Modo del segundo canal de recepción, cuando `n_rx_channels > 1`"""
 
@@ -498,6 +505,7 @@ class CapabilityFlag:
     RFI_FILTER = 32
     SPECTRUM_FEED = 64
     IQ_ARCHIVE = 128
+    SZ864 = 256
 
 class BiteFlag:
     """Catálogo de fallos del DSP."""

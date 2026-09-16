@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.2 — lado MMI.
+// Contrato DSP↔RCP v1.3 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 2;
+export const VERSION_MINOR = 3;
 
 const LE = true;
 
@@ -793,8 +793,8 @@ export interface Config {
   estimator: number;
   /** Filtrado de interferencia de banda estrecha: 0 no, 1 sí. */
   rfiFilter: number;
-  /** Recuperación de trip múltiple: 0 no, 1 sí. */
-  rangeDealias: number;
+  /** Método de recuperación/detección de trip múltiple. Ver la enumeración `range_dealias_mode`. */
+  rangeDealiasMode: number;
   /** Numerador de la razón dual-PRF; 0 si no aplica. */
   prfRatioNum: number;
   /** Denominador de la razón dual-PRF; 0 si no aplica. */
@@ -849,7 +849,7 @@ export const CONFIG_OFFSETS = {
   sweepMode: 14,
   estimator: 15,
   rfiFilter: 16,
-  rangeDealias: 17,
+  rangeDealiasMode: 17,
   prfRatioNum: 18,
   prfRatioDen: 19,
   startRangeM: 20,
@@ -883,7 +883,7 @@ export function decodeConfig(view: DataView, base = 0): Config {
     sweepMode: view.getUint8(base + 14),
     estimator: view.getUint8(base + 15),
     rfiFilter: view.getUint8(base + 16),
-    rangeDealias: view.getUint8(base + 17),
+    rangeDealiasMode: view.getUint8(base + 17),
     prfRatioNum: view.getUint8(base + 18),
     prfRatioDen: view.getUint8(base + 19),
     startRangeM: view.getFloat32(base + 20, LE),
@@ -918,7 +918,7 @@ export function encodeConfig(value: Config, view?: DataView, base = 0): DataView
   dv.setUint8(base + 14, value.sweepMode);
   dv.setUint8(base + 15, value.estimator);
   dv.setUint8(base + 16, value.rfiFilter);
-  dv.setUint8(base + 17, value.rangeDealias);
+  dv.setUint8(base + 17, value.rangeDealiasMode);
   dv.setUint8(base + 18, value.prfRatioNum);
   dv.setUint8(base + 19, value.prfRatioDen);
   dv.setFloat32(base + 20, value.startRangeM, LE);
@@ -1180,6 +1180,23 @@ export const DealiasMode = {
 } as const;
 
 /**
+ * Método de recuperación/detección de segundo trip
+ * (`docs/algorithms/roadmap.md` §"Decisiones cerradas" ítem "`range_dealias`
+ * sin SZ"). v0.2 lo declaraba con un solo bit booleano; v0.3 lo convierte en
+ * enumeración para poder distinguir la vía SZ(8/64) (klistrón) de la vía
+ * histórica de fase aleatoria (magnetrón) sin cambiar tamaño ni posición del
+ * campo — `0`/`1` conservan el significado que ya tenían.
+ */
+export const RangeDealiasMode = {
+  /** Sin recuperación de trip múltiple; sólo se procesa el primer trip. */
+  NONE: 0,
+  /** Detección y marcado cross-radial (`crates/service::ray`); recuperación real sólo en instalación magnetrón, vía la fase de burst aleatoria pulso a pulso (`lamula_range_dealias`). */
+  RANDOM_PHASE: 1,
+  /** Recuperación por codificación de fase SZ(8/64) (`docs/algorithms/sz-second-trip-recovery.md`, `crates/sz864`); exige transmisor con fase programable pulso a pulso (klistrón/TWT/estado sólido) y `capability_flag::sz864`. Sin cablear en `crates/service::ray` todavía. */
+  SZ_8_64: 2,
+} as const;
+
+/**
  * Modo del segundo canal de recepción, cuando `n_rx_channels > 1`
  * (`docs/algorithms/roadmap.md` §"Decisiones cerradas"). Sin efecto con canal
  * único: no hay segundo canal con que elegir modo.
@@ -1249,7 +1266,7 @@ export const CapabilityFlag = {
   DUAL_PRF: 4,
   /** Dealiasing por PRT escalonado disponible. */
   STAGGERED_PRT: 8,
-  /** Recuperación de trip múltiple disponible. */
+  /** Recuperación/detección de trip múltiple por fase aleatoria (magnetrón) disponible. Ver `range_dealias_mode::random_phase`. */
   RANGE_DEALIAS: 16,
   /** Filtrado de interferencia de banda estrecha disponible. */
   RFI_FILTER: 32,
@@ -1257,6 +1274,8 @@ export const CapabilityFlag = {
   SPECTRUM_FEED: 64,
   /** Volcado de series temporales crudas disponible. */
   IQ_ARCHIVE: 128,
+  /** Recuperación de trip múltiple por codificación de fase SZ(8/64) disponible (exige klistrón/TWT/estado sólido con fase programable). Ver `range_dealias_mode::sz_8_64`. */
+  SZ864: 256,
 } as const;
 
 /**

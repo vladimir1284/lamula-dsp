@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.2 — lado DSP.
+// Contrato DSP↔RCP v1.3 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 2;
+pub const VERSION_MINOR: u8 = 3;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -359,8 +359,8 @@ pub struct Config {
     pub estimator: u8,
     /// Filtrado de interferencia de banda estrecha: 0 no, 1 sí.
     pub rfi_filter: u8,
-    /// Recuperación de trip múltiple: 0 no, 1 sí.
-    pub range_dealias: u8,
+    /// Método de recuperación/detección de trip múltiple. Ver la enumeración `range_dealias_mode`.
+    pub range_dealias_mode: u8,
     /// Numerador de la razón dual-PRF; 0 si no aplica.
     pub prf_ratio_num: u8,
     /// Denominador de la razón dual-PRF; 0 si no aplica.
@@ -579,6 +579,21 @@ pub mod dealias_mode {
     pub const STAGGERED_PRT: u8 = 2;
 }
 
+/// Método de recuperación/detección de segundo trip
+/// (`docs/algorithms/roadmap.md` §"Decisiones cerradas" ítem "`range_dealias`
+/// sin SZ"). v0.2 lo declaraba con un solo bit booleano; v0.3 lo convierte en
+/// enumeración para poder distinguir la vía SZ(8/64) (klistrón) de la vía
+/// histórica de fase aleatoria (magnetrón) sin cambiar tamaño ni posición del
+/// campo — `0`/`1` conservan el significado que ya tenían.
+pub mod range_dealias_mode {
+    /// Sin recuperación de trip múltiple; sólo se procesa el primer trip.
+    pub const NONE: u8 = 0;
+    /// Detección y marcado cross-radial (`crates/service::ray`); recuperación real sólo en instalación magnetrón, vía la fase de burst aleatoria pulso a pulso (`lamula_range_dealias`).
+    pub const RANDOM_PHASE: u8 = 1;
+    /// Recuperación por codificación de fase SZ(8/64) (`docs/algorithms/sz-second-trip-recovery.md`, `crates/sz864`); exige transmisor con fase programable pulso a pulso (klistrón/TWT/estado sólido) y `capability_flag::sz864`. Sin cablear en `crates/service::ray` todavía.
+    pub const SZ_8_64: u8 = 2;
+}
+
 /// Modo del segundo canal de recepción, cuando `n_rx_channels > 1`
 /// (`docs/algorithms/roadmap.md` §"Decisiones cerradas"). Sin efecto con canal
 /// único: no hay segundo canal con que elegir modo.
@@ -637,7 +652,7 @@ pub mod capability_flag {
     pub const DUAL_PRF: u32 = 4;
     /// Dealiasing por PRT escalonado disponible.
     pub const STAGGERED_PRT: u32 = 8;
-    /// Recuperación de trip múltiple disponible.
+    /// Recuperación/detección de trip múltiple por fase aleatoria (magnetrón) disponible. Ver `range_dealias_mode::random_phase`.
     pub const RANGE_DEALIAS: u32 = 16;
     /// Filtrado de interferencia de banda estrecha disponible.
     pub const RFI_FILTER: u32 = 32;
@@ -645,6 +660,8 @@ pub mod capability_flag {
     pub const SPECTRUM_FEED: u32 = 64;
     /// Volcado de series temporales crudas disponible.
     pub const IQ_ARCHIVE: u32 = 128;
+    /// Recuperación de trip múltiple por codificación de fase SZ(8/64) disponible (exige klistrón/TWT/estado sólido con fase programable). Ver `range_dealias_mode::sz_8_64`.
+    pub const SZ864: u32 = 256;
 }
 
 /// Catálogo de fallos del DSP.

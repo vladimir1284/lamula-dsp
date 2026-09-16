@@ -131,7 +131,7 @@ fn drx_afc() {
 fn dsp_identidad() {
     assert_eq!(dsp_rcp::MAGIC, 0x4C4D_4453, "magic no es \"LMDS\"");
     assert_eq!(dsp_rcp::VERSION_MAJOR, 1);
-    assert_eq!(dsp_rcp::VERSION_MINOR, 2);
+    assert_eq!(dsp_rcp::VERSION_MINOR, 3);
 }
 
 /// Los dos contratos comparten forma y tamaño de cabecera a propósito, para que
@@ -269,7 +269,7 @@ fn dsp_config() {
         dsp_rcp::Config, 84,
         seq: 4, moment_mask: 4, n_pulses: 2, n_gates: 2, clutter_filter: 1,
         dealias_mode: 1, sweep_mode: 1, estimator: 1, rfi_filter: 1,
-        range_dealias: 1, prf_ratio_num: 1, prf_ratio_den: 1,
+        range_dealias_mode: 1, prf_ratio_num: 1, prf_ratio_den: 1,
         start_range_m: 4, gate_spacing_m: 4, prf_hz: 4, sqi_threshold: 4,
         sig_threshold: 4, ccor_threshold: 4, log_threshold: 4,
         clutter_width_ms: 4, radar_constant_db: 4, noise_floor_dbm: 4,

@@ -139,14 +139,15 @@
 //! (`staggered_prt_split`) es una inferencia mía sin respaldo de oráculo,
 //! ver su doc-comment.
 //!
-//! Dealiasing de rango (`config.range_dealias`): detección y marcado
+//! Dealiasing de rango (`config.range_dealias_mode`): detección y marcado
 //! cross-radial vía `PreviousPrf` igual que dual-PRF pero sin depender de
 //! `dealias_mode` — ver el doc-comment junto a `range_dealias_detected` en
 //! [`build_moment_ray`], que también explica por qué NO usa `classify_trip`
-//! de `lamula-range-dealias` (inferencia sin respaldo de oráculo). La
-//! recuperación por fase aleatoria en magnetrón ya está cableada, pero NO
-//! llamando a `lamula_range_dealias::recover_trip1` directamente: ese bloqueo
-//! de contrato (falta de fase de burst por pulso en el wire) ya se cerró con
+//! de `lamula-range-dealias` (inferencia sin respaldo de oráculo). Este
+//! bloque sólo corre para `range_dealias_mode::RANDOM_PHASE`: la recuperación
+//! por fase aleatoria en magnetrón ya está cableada, pero NO llamando a
+//! `lamula_range_dealias::recover_trip1` directamente: ese bloqueo de
+//! contrato (falta de fase de burst por pulso en el wire) ya se cerró con
 //! [`burst_phase_correct`], que corrige TODA celda de todo canal con la fase
 //! de burst de su propio pulso antes de que corra cualquier pulse-pair — la
 //! misma operación, celda a celda, que hace `recover_trip1` (corregir con la
@@ -154,13 +155,21 @@
 //! HS74 blanquea a ruido). Por eso las celdas con evidencia de trip2 en una
 //! instalación de magnetrón con burst wireado YA traen el valor recuperado
 //! en `uz_values`/`v_values`/`cz_values` cuando llegan a este bloque: no
-//! hay nada que recuperar aparte, sólo decidir no censurarlas. El contrato
-//! sigue sin un campo de hardware (magnetrón vs coherente, ver "Decisiones
-//! cerradas" en `docs/algorithms/roadmap.md`) — la distinción vive en la
-//! constante local `MAGNETRON_TRANSMITTER`, mismo tipo de hueco que
-//! `ZPHI_A_COEF_DB_PER_DEG`, porque en transmisor coherente el segundo trip
-//! es igual de determinista que el primero y corregir con la fase de éste no
-//! decorrelaciona nada — ahí sigue aplicando sólo detección y marcado.
+//! hay nada que recuperar aparte, sólo decidir no censurarlas. La distinción
+//! magnetrón/coherente vive en la constante local `MAGNETRON_TRANSMITTER`,
+//! mismo tipo de hueco que `ZPHI_A_COEF_DB_PER_DEG`, porque en transmisor
+//! coherente el segundo trip es igual de determinista que el primero y
+//! corregir con la fase de éste no decorrelaciona nada — ahí sigue aplicando
+//! sólo detección y marcado. `range_dealias_mode::SZ_8_64` (v0.3 del
+//! contrato, `docs/algorithms/sz-second-trip-recovery.md`) declara la vía
+//! de recuperación por codificación de fase para instalación klistrón, pero
+//! sigue sin cablear aquí a propósito: exige `crates/sz864::separate_trips`
+//! sobre la serie compleja cruda por pulso (este módulo hoy sólo ve
+//! `uz_values`/`v_values`/`cz_values` ya reducidos a momentos) y el canal
+//! DRx que le da al excitador el patrón de fase a transmitir — ninguno de
+//! los dos existe todavía. Un radial configurado con `SZ_8_64` no entra en
+//! este bloque: no se censura ni se recupera nada, exactamente como si
+//! `range_dealias_mode` fuera `NONE`.
 
 use lamula_attenuation::zphi_correct_dbz;
 use lamula_burst::{burst_phase_estimate, correct_phase};
@@ -169,7 +178,7 @@ use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
 use lamula_contract::drx_dsp::channel;
 use lamula_contract::dsp_rcp::{
     clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind,
-    polarization_mode, ray_flag, Config, MomentField, MomentRay, SpectrumFrame,
+    polarization_mode, range_dealias_mode, ray_flag, Config, MomentField, MomentRay, SpectrumFrame,
 };
 use lamula_dual_prf::{continuity_fix, dealias_dual_prf};
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
@@ -1070,7 +1079,7 @@ pub fn build_moment_ray(
     // posible y se mantiene sólo detección y marcado.
     let can_recover_trip1 = MAGNETRON_TRANSMITTER && burst_corrected.is_some();
     let mut range_dealias_detected = false;
-    if config.range_dealias != 0 {
+    if config.range_dealias_mode == range_dealias_mode::RANDOM_PHASE {
         let range_dealias_role: Option<bool> = match previous_prf {
             Some(prev) if prev.prf_div != radial.prf_div => Some(radial.prf_div > prev.prf_div),
             _ => None,
@@ -1566,7 +1575,7 @@ mod tests {
             sweep_mode: 0,
             estimator: 0,
             rfi_filter: 0,
-            range_dealias: 0,
+            range_dealias_mode: 0,
             prf_ratio_num: 0,
             prf_ratio_den: 0,
             start_range_m: 0.0,
@@ -2475,13 +2484,14 @@ mod tests {
     #[test]
     fn range_dealias_detection_censors_only_trip2_evidenced_cells() {
         // Reutiliza el par de PRT de `dual_prf_config` (1.2ms/0.8ms, razón
-        // 2:3) pero con `dealias_mode = NONE` y `range_dealias = 1`: prueba
-        // que la detección de trip múltiple corre independiente del modo de
-        // desdoblado de velocidad, tal como describe el doc-comment junto a
-        // `range_dealias_detected` en `build_moment_ray`.
+        // 2:3) pero con `dealias_mode = NONE` y `range_dealias_mode =
+        // RANDOM_PHASE`: prueba que la detección de trip múltiple corre
+        // independiente del modo de desdoblado de velocidad, tal como
+        // describe el doc-comment junto a `range_dealias_detected` en
+        // `build_moment_ray`.
         let mut config = dual_prf_config();
         config.dealias_mode = dealias_mode::NONE;
-        config.range_dealias = 1;
+        config.range_dealias_mode = range_dealias_mode::RANDOM_PHASE;
         config.moment_mask = 1 << moment_kind::UZ;
 
         let (_, prt_high, ..) = dual_prf_split(&config);
@@ -2619,7 +2629,7 @@ mod tests {
         // ya contrasta `crates/burst`/`crates/range-dealias` contra oráculo.
         let mut config = dual_prf_config();
         config.dealias_mode = dealias_mode::NONE;
-        config.range_dealias = 1;
+        config.range_dealias_mode = range_dealias_mode::RANDOM_PHASE;
         config.moment_mask = 1 << moment_kind::UZ;
         config.burst_window_bins = 1;
 

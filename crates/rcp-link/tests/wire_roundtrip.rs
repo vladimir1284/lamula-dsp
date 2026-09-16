@@ -193,7 +193,7 @@ fn build_config_frame(cfg: &Config) -> Vec<u8> {
     buf.push(cfg.sweep_mode);
     buf.push(cfg.estimator);
     buf.push(cfg.rfi_filter);
-    buf.push(cfg.range_dealias);
+    buf.push(cfg.range_dealias_mode);
     buf.push(cfg.prf_ratio_num);
     buf.push(cfg.prf_ratio_den);
     buf.extend_from_slice(&cfg.start_range_m.to_le_bytes());
@@ -230,7 +230,7 @@ fn decode_config_is_inverse_of_hand_built_frame() {
         sweep_mode: dsp_rcp::sweep_mode::PPI,
         estimator: dsp_rcp::estimator::PULSE_PAIR,
         rfi_filter: 1,
-        range_dealias: 0,
+        range_dealias_mode: 0,
         prf_ratio_num: 4,
         prf_ratio_den: 5,
         start_range_m: 150.0,

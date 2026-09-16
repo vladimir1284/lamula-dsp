@@ -724,6 +724,28 @@ aleatoria en magnetrón (hoy ambas comparten el mismo bit `range_dealias`, ver l
 por el que el excitador recibe el patrón de fase a transmitir — trabajo de contrato e integración con DRx, no de
 algoritmo, y no emprendido en este cambio.
 
+**2026-09-16: mitad del trámite de contrato de arriba, hecha — la mitad que le corresponde a este proyecto.** El
+contrato `DSP↔RCP` (propio, `contract/schema/dsp_rcp_v0_1.toml`) ya distingue las dos vías: `config.range_dealias`
+(`u8` booleano) se reemplaza por `config.range_dealias_mode`, enumeración `NONE`/`RANDOM_PHASE`/`SZ_8_64` en el mismo
+byte y misma posición de wire — `0`/`1` conservan el significado que ya tenían, así que el cambio es compatible
+(`version_minor` 2→3, no `version_major`). Se agrega `capability_flag::SZ864` (bit 256) junto al `RANGE_DEALIAS`
+existente (bit 16, ahora documentado explícitamente como "sólo la vía de fase aleatoria"), para que `status`/
+`selftest_result` puedan anunciar la capacidad SZ(8/64) por separado de la de magnetrón. Regenerado
+`contract/generated/` (Rust/Python/TS) con `tools/gen_contract.py`; actualizados los sitios que ya usaban el campo
+(`crates/rcp-link/src/{session,validate,wire}.rs`, sus tests, `crates/service::ray`, `crates/service/tests/*`,
+`crates/service/benches/moment_ray.rs`, `crates/contract/tests/layout.rs`, `contract/tests/test_dsp_rcp_codegen.py`).
+En `crates/service::ray` el bloque de detección/marcado cross-radial ahora comprueba explícitamente
+`range_dealias_mode::RANDOM_PHASE` en vez de `!= 0`: un `config` con `SZ_8_64` no entra en ese bloque (no se censura
+ni se recupera nada ahí), porque ese bloque asume la vía de magnetrón (`MAGNETRON_TRANSMITTER` +
+`burst_phase_correct`) y aplicarlo a una instalación SZ(8/64) sería incorrecto, no sólo incompleto. **Lo que esto NO
+hace**: no cablea `crates/sz864::separate_trips` en `crates/service::ray` (ese bloque sigue viendo sólo
+`uz_values`/`v_values`/`cz_values` ya reducidos a momentos, no la serie compleja cruda por pulso que `separate_trips`
+necesita) y no toca el contrato `DRx↔DSP` (vendorizado, `contract/vendor/`, propiedad del proyecto DRx) para el canal
+por el que el excitador recibiría el patrón de fase — eso sigue siendo trámite cross-equipo, no algoritmo, y sigue sin
+emprender. `cargo build`/`cargo test --workspace` (79 test binaries, 0 fallos)/`cargo clippy --all-targets -- -D
+warnings`/`cargo fmt --check` en verde; batería de contraste de codegen en Python (`contract/tests`, `.venv/bin/python
+-m pytest`, 71/71) también en verde.
+
 **Fase 4 — semilla de la puerta de rendimiento (`crates/service/benches/moment_ray.rs`), no un gate de CI todavía.**
 `docs/dsp-plan.md` §10 pide "benchmark-regression gates (criterion) en los hot loops" porque el compute de estimación
 de momentos, no el enlace 1GbE, es la restricción firm-real-time (§4.3, §11). Hasta este cambio no existía ningún

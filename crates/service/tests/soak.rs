@@ -98,7 +98,7 @@ fn pipeline_survives_thousands_of_varied_radials_without_panicking_or_publishing
             sweep_mode: 0,
             estimator: 0,
             rfi_filter: (i % 3 == 0) as u8,
-            range_dealias: 0,
+            range_dealias_mode: 0,
             prf_ratio_num: 0,
             prf_ratio_den: 0,
             start_range_m: 0.0,
