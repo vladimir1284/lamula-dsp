@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/drx_dsp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DRx↔DSP v0.3 — lado DSP.
+// Contrato DRx↔DSP v0.4 — lado DSP.
 //
 // Little-endian, empaquetado. Los `assert!` de tamaño viven en los tests
 // del proyecto DSP; aquí van como constantes para que se puedan comprobar.
@@ -10,7 +10,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4452;
 pub const VERSION_MAJOR: u8 = 0;
-pub const VERSION_MINOR: u8 = 3;
+pub const VERSION_MINOR: u8 = 4;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -204,20 +204,18 @@ pub mod error {
     pub const NOT_CONFIGURED: u8 = 9;
 }
 
-/// Bit por canal físico presente en channel_mask. El orden de channels[] en el payload de ray sigue el orden ascendente de los bits puestos en channel_mask; cada canal aporta los mismos `bins` que el resto del rayo.
+/// Bit por canal físico presente en channel_mask. El orden de channels[] en el payload de ray sigue el orden ascendente de los bits puestos en channel_mask; cada canal aporta los mismos `bins` que el resto del rayo. rx_0..rx_3 son 2 conversores por polarización (H, V): uno a ganancia nominal y otro con la señal atenuada, para extender el rango dinámico (confirmado en sesión, 8-sep-2026). El emparejamiento H/V de arriba está confirmado; el orden concreto rx_0 vs rx_1 (¿cuál es el nominal y cuál el atenuado de cada polarización?) es una CONVENCIÓN asumida aquí, sin confirmar todavía contra el cableado físico — ver docs/alcance/pendientes.md, A10.
 pub mod channel {
-    /// Canal Rx IF 0.
+    /// H, ganancia nominal (convención asumida, ver doc del enum).
     pub const RX_0: u8 = 1;
-    /// Canal Rx IF 1.
+    /// H, señal atenuada — rango dinámico extendido (convención asumida, ver doc del enum).
     pub const RX_1: u8 = 2;
-    /// Canal Rx IF 2.
+    /// V, ganancia nominal (convención asumida, ver doc del enum).
     pub const RX_2: u8 = 4;
-    /// Canal Rx IF 3.
+    /// V, señal atenuada — rango dinámico extendido (convención asumida, ver doc del enum).
     pub const RX_3: u8 = 8;
-    /// Canal de burst de Tx 0. Trae energía sólo durante la ventana del pulso transmitido; el resto de sus bins es ruido/silencio.
+    /// Muestra del transmisor. Un solo conversor físico (n_tx_burst_ch=1, 8-sep-2026): trae energía sólo durante la ventana del pulso transmitido; el resto de sus bins es ruido/silencio.
     pub const TX_BURST_0: u8 = 16;
-    /// Canal de burst de Tx 1. Misma convención que tx_burst_0.
-    pub const TX_BURST_1: u8 = 32;
 }
 
 /// Banderas por rayo. Un rayo con problemas se MARCA, no se descarta.

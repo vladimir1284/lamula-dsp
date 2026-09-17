@@ -104,7 +104,8 @@ impl AssembledRadial {
     }
 
     /// Ventana de burst del pulso `pulse_idx` en el canal marcado por `bit`
-    /// (típicamente `drx_dsp::channel::TX_BURST_0`/`TX_BURST_1`): los
+    /// (típicamente `drx_dsp::channel::TX_BURST_0`, el único canal de burst
+    /// del contrato desde v0.4 — `n_tx_burst_ch=1`): los
     /// primeros `window_bins` bins de ese canal en ese pulso — la longitud
     /// que declara `Config::burst_window_bins` del contrato `DSP↔RCP`, el
     /// resto del canal es ruido/silencio (`drx_dsp::channel`, doc del enum).

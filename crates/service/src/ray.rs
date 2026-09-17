@@ -621,10 +621,9 @@ fn clutter_filtered_power(
 /// consecutivos es ruido uniforme y ningún estimador Doppler aguas abajo
 /// significa nada (prerrequisito duro, fase 1 del plan para magnetrón).
 ///
-/// Sólo consume `channel::TX_BURST_0`: si el hardware trae también
-/// `TX_BURST_1`, este cableo inicial no lo usa — una sola referencia de fase
-/// alcanza para coherent-on-receive, un segundo canal de burst es
-/// redundancia de hardware, no un algoritmo distinto. Con transmisor
+/// Sólo consume `channel::TX_BURST_0`: es el único canal de burst que existe
+/// (`n_tx_burst_ch=1`, confirmado 2026-09-08 — un solo conversor físico,
+/// `TX_BURST_1` ya no existe en el contrato). Con transmisor
 /// coherente la corrección compensa un desfase de sistema constante en vez
 /// de ruido pulso a pulso; el código no distingue los dos casos, sólo mide
 /// lo que hay.
