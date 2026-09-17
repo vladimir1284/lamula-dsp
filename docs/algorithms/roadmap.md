@@ -870,6 +870,34 @@ doc-comment de `config.rs` y cada punto de uso).
 (Fase 0 no decidió CPU/SBC objetivo todavía), y el archivo de I/Q crudo de investigación (mismo §3.1) sigue sin
 cablear en `crates/service` — la unidad systemd lo señala explícitamente en vez de fingir que ya existe.
 
+## Abierto (cross-proyecto): banco de pruebas extremo a extremo contra ZedBoard real
+
+Identificado en revisión de integración cruzada, 2026-09-17. Dueño: los tres equipos (DRx + DSP +
+RCP), no tiene dueño único hoy.
+
+Este proyecto valida su M1 (§8.2) contra su propio simulador sintético de I/Q, con verdad-terreno
+analítica. Eso es correcto para lo que M1 promete, pero significa que **la ingesta 1GbE de este
+DSP nunca se ha ejercitado contra tráfico real de un DRx corriendo en hardware** — ni cadencia real,
+ni jitter real, ni contrapresión real, solo lo que el simulador propio decide generar.
+
+El proyecto LAMULA DRx ya tiene, en su plataforma de desarrollo ZedBoard, un inyector de vectores
+digitales (`vector_source`) que sobrevive incluso en la placa final y que es indistinguible aguas
+abajo del ADC/JESD204B real (ver `fuente-de-muestras.md` de ese proyecto) — es decir, ya hoy se
+puede generar en el PL una señal de I/Q conocida y hacerla recorrer DDC, range gating, timing/PRF,
+tagging az/el, ensamblado de rayos y el framing DRx↔DSP real sobre 1GbE físico. Pero **ningún plan
+apunta esa salida real hacia este DSP**: el hito ZM4 del DRx (`docs/implementacion/fases.md#z4` de
+ese repo) fija como salida un stub de DSP, no el binario de este proyecto. Y aguas abajo, el RCP
+solo ha ejercido su adaptador contra un stub propio o contra `radar_emulator` — ninguno de los dos
+relacionado con el DRx (PEND-RCP-05 y PEND-RCP-13 de `lamula-rcp/docs/alcance/pendientes.md`).
+
+**Lo que le tocaría a este proyecto en ese hito, cuando se acuerde:** un punto de entrada de
+ingesta 1GbE real, corriendo contra la salida física de una ZedBoard con `vector_source`, en vez de
+(o adicionalmente a) el simulador sintético — validaría el AAL y `crates/ingest` contra timing y
+contrapresión de hardware real sin esperar a la ZU9 ni al frontal analógico (eso sigue sin
+mitigación, es el pendiente P-03 del DRx). Hoy no hay fecha ni item de trabajo para esto en la
+tabla de fases de §8.2 — es un hueco, no una tarea priorizada. Ver el pendiente P-10 en
+`lamula-drx/docs/alcance/pendientes.md` y PEND-RCP-13 en `lamula-rcp/docs/alcance/pendientes.md`.
+
 ## Referencias abiertas / implementaciones libres
 
 - Doviak, R. J. & Zrnić, D. S., *Doppler Radar and Weather Observations*, 2ª ed., Academic Press, 1993 — referencia canónica transversal a todo el conjunto.
