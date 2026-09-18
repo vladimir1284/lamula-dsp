@@ -870,6 +870,50 @@ doc-comment de `config.rs` y cada punto de uso).
 (Fase 0 no decidió CPU/SBC objetivo todavía), y el archivo de I/Q crudo de investigación (mismo §3.1) sigue sin
 cablear en `crates/service` — la unidad systemd lo señala explícitamente en vez de fingir que ya existe.
 
+**2026-09-18: alternante + `DUAL_PRF`/`STAGGERED_PRT` — cerrado (el hueco que dejaba abierto el ítem "Modo de
+polarización de la instalación" más arriba: "ninguna de esas dos ramas usa `own_prt_for_main`").** Las dos
+combinaciones resultaron tener naturaleza distinta, no el mismo hueco con dos nombres.
+
+**DUAL_PRF + alternante — bug mecánico, corregido.** El desdoblado por teorema chino del resto entre radiales de
+rol opuesto seguía aplicando bien en principio (cada radial mantiene un único PRT propio, sólo doblado por
+`own_prt_for_main` igual que el resto del pipeline), pero `v_a1`/`v_a2`/`v_ext` de [`dual_prf_split`] (y el mismo
+`v_ext` publicado en `nyquist_velocity`) seguían calculados sobre el PRT SIN doblar — desajuste entre la fase, ya
+plegada a la mitad de Nyquist, y la ventana de aceptación de `dealias_dual_prf`, calculada para el doble. `crates/service::ray`
+gana `alt_scale` (`0.5` si alternante, `1.0` si no) aplicado a esos tres valores en los dos sitios que los usan
+(`dealiased_velocity_mps` y `nyquist_velocity`) — el cociente de reescalado de la velocidad guardada del radial
+anterior (`prev.own_prt_s / prev_correct_prt_s`) no lo necesita: el factor de doblado es el mismo en los dos
+radiales del par y se cancela en la razón. Regresión (`dual_prf_pair_unfolds_velocity_with_alternating_polarization`)
+verificada contra el bug real: revertido `alt_scale` a `1.0` a mano, el mismo test recupera −50.5 m/s en vez de los
+12 m/s verdaderos — no es un test tautológico.
+
+**STAGGERED_PRT + alternante — hallazgo físico, no sólo bug de cableo: la extensión de Nyquist no es alcanzable.**
+H y V alternan pulso a pulso, y `T1`,`T2` también alternan pulso a pulso, atados al mismo índice de pulso. La
+subserie copolar H (`main_channel`, paridad par) sólo toma uno de cada dos pulsos: la separación entre H
+consecutivos es `T1+T2`, CONSTANTE — el patrón `T1,T2` alternado que el teorema chino del resto necesita para
+reconciliar dos Nyquist distintas desaparece dentro de esa subserie. No hay dos tasas que reconciliar, sólo un PRT
+único. Antes de este cambio, `staggered_velocity_mps` corría de todos modos sobre `radial.channels[0]` SIN partir
+por polarización (mismo tipo de contaminación de fase ya corregido para pulse-pair/espectral/clutter en el ítem de
+arriba) — doblemente incorrecto: ni la técnica aplica a una serie uniforme, ni la serie que recibía era la copolar
+correcta. **Degradado deliberado, sin bandera de contrato nueva** (autorizado explícitamente por el usuario en vez
+de tratar la combinación como no soportada o reusar `ray_flag::DEALIAS_FAILED` con un significado distinto al que
+ya tiene): se publica la fase pulse-pair de `main_channel` a `own_prt_for_main` (≈`T1+T2`) tal cual, plegada a la
+Nyquist de ese único PRT — `nyquist_velocity` también cambia de la extendida a esa misma base. Mismo criterio de
+"documentar la inferencia en vez de hornear una señal nueva" que `RHOHV_THRESHOLD_KDP`/`ccor_db` indefinido. Regresión
+(`staggered_prt_alternating_degrades_to_single_prt_without_cross_pol_contamination`) con dos partes: (1) el valor
+publicado se acerca a v_true con la Nyquist de PRT único; (2) llamar la técnica staggered directamente sobre la
+serie intercalada SIN partir (el bug evitado) con un tono V deliberadamente ajeno a v_true da un resultado
+claramente contaminado — confirma que el bug era real, no hipotético. `crates/staggered-prt` no cambia: ya
+declaraba esta interacción fuera de su propio alcance ("Fuera de alcance de este crate: la interacción con
+polarimetría alternante"), el ajuste es enteramente de cableo en `crates/service::ray`. `cargo build`/`cargo test
+--workspace`/`cargo clippy -p lamula-dsp-service --all-targets -- -D warnings`/`cargo fmt --check -p
+lamula-dsp-service` en verde.
+
+**Lo que esto NO resuelve**: sigue sin oráculo formal la combinación (ninguna fórmula nueva que oracular — el
+cambio es de reescalado y de degradación a una técnica ya validada, mismo tipo de hueco que `split_by_tx_polarization`);
+y la propia combinación STAGGERED_PRT + alternante sigue siendo, por diseño de hardware, poco probable (alternar
+polarización Y periodo de muestreo a la vez) — este cierre la deja con comportamiento correcto y documentado, no
+la promueve a caso de uso soportado activamente.
+
 ## Abierto (cross-proyecto): banco de pruebas extremo a extremo contra ZedBoard real
 
 Identificado en revisión de integración cruzada, 2026-09-17. Dueño: los tres equipos (DRx + DSP +

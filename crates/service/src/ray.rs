@@ -137,7 +137,14 @@
 //! dentro del propio radial — ver [`staggered_velocity_mps`]) están
 //! cableados. La conversión `Config` → `T1`,`T2` de staggered-PRT
 //! (`staggered_prt_split`) es una inferencia mía sin respaldo de oráculo,
-//! ver su doc-comment.
+//! ver su doc-comment. Combinación con polarización alternante: dual-PRF
+//! sigue funcionando (cada radial mantiene un único PRT, sólo doblado, y la
+//! ventana de plegado del desdoblado se escala igual — ver `alt_scale` en
+//! `build_moment_ray`); staggered-PRT no puede extender su Nyquist en este
+//! modo (la subserie copolar H pierde el patrón `T1,T2` alternado — PRT
+//! uniforme `T1+T2` dentro de esa subserie), así que se degrada
+//! deliberadamente a la velocidad de PRT único sin desdoblar — ver el
+//! doc-comment junto a `dealiased_velocity_mps` en `build_moment_ray`.
 //!
 //! Dealiasing de rango (`config.range_dealias_mode`): detección y marcado
 //! cross-radial vía `PreviousPrf` igual que dual-PRF pero sin depender de
@@ -814,6 +821,23 @@ pub fn build_moment_ray(
     } else {
         own_prt_s
     };
+    // DUAL_PRF + alternante: cada radial sigue teniendo un único PRT propio
+    // (sólo doblado por `own_prt_for_main`, arriba), así que el desdoblado
+    // por teorema chino del resto entre radiales de rol opuesto sigue
+    // aplicando igual — es la combinación STAGGERED_PRT la que no puede usar
+    // este mismo truco de escala (ver `alt_scale`'s uso más abajo, y el
+    // comentario junto a `dealiased_velocity_mps`). Como la fase de
+    // `raw_velocity_mps` ya se calculó con el PRT doblado, la ventana de
+    // plegado (`v_a1`/`v_a2`/`v_ext` de [`dual_prf_split`], que asumen el
+    // PRT SIN doblar) tiene que encogerse a la mitad para seguir
+    // describiendo el mismo periodo físico — de lo contrario `dealias_dual_prf`
+    // compara una fase plegada a Nyquist mitad contra una ventana de
+    // aceptación de Nyquist completa, y falla en silencio (acepta como
+    // "sin plegar" un valor que sí estaba plegado). El cociente de reescalado
+    // de `prev_velocity_rescaled` (más abajo) no necesita este factor: los
+    // dos PRT que compara (el propio de `prev` y el correcto de este radial)
+    // se doblan por igual, y el factor se cancela en la razón.
+    let alt_scale = if alternating { 0.5 } else { 1.0 };
 
     // UZ/V/SQI/SIG sólo corren sobre el canal 0 — H, por convención del
     // contrato (en modo alternante, su subserie copolar `main_channel`, ver
@@ -918,12 +942,44 @@ pub fn build_moment_ray(
     // queda en `PreviousPrf` por uniformidad de la firma — dual-PRF nunca
     // la lee porque `dual_prf_role` es `None` cuando `dealias_mode !=
     // DUAL_PRF`.
+    //
+    // STAGGERED_PRT + alternante — degradado deliberado, sin extensión de
+    // Nyquist: `staggered_velocity_mps` asume que pulsos consecutivos de
+    // `radial.channels[0]` están separados alternadamente por `T1`,`T2`. Con
+    // polarización alternante, H y V también alternan pulso a pulso sobre el
+    // MISMO índice de pulso: la subserie copolar H (`main_channel`, la única
+    // libre de la contaminación ΦDP/ZDR que ya obligó a usar `main_channel`
+    // en el resto de este bloque) sólo trae los pulsos pares, separados por
+    // `T1+T2` de forma UNIFORME — el patrón T1,T2 que el teorema chino del
+    // resto necesita para reconciliar dos Nyquist distintas desaparece
+    // dentro de esa subserie: no hay dos tasas que reconciliar, sólo un PRT
+    // único. Llamar a `staggered_velocity_mps(radial, ..)` tal cual sería
+    // doblemente incorrecto: opera sobre `radial.channels[0]` sin partir por
+    // polarización (mismo tipo de contaminación de fase ya corregido para
+    // pulse-pair/espectral/clutter, ver el doc-comment de `main_channel`), Y
+    // aunque partiera, la técnica en sí no aplica a una serie uniforme.
+    // **Inferencia mía sin respaldo de oráculo** (autorizada explícitamente
+    // por el usuario en vez de bloquear el cableo, ver
+    // `docs/algorithms/roadmap.md` §"Orden de trabajo"): se publica
+    // `raw_velocity_mps` tal cual — la fase pulse-pair ya calculada sobre
+    // `main_channel` a `own_prt_for_main` (≈`T1+T2`), plegada a la Nyquist de
+    // ese único PRT, sin bandera de contrato nueva que distinga este caso
+    // de un staggered-PRT normal (mismo criterio de "documentar en vez de
+    // hornear una señal nueva" que el resto de huecos de esta sección). Ver
+    // el mismo ajuste en `nyquist_velocity` más abajo.
     let dealiased_velocity_mps: Vec<f32> = if config.dealias_mode == dealias_mode::STAGGERED_PRT {
-        staggered_velocity_mps(radial, config)
+        if alternating {
+            raw_velocity_mps.clone()
+        } else {
+            staggered_velocity_mps(radial, config)
+        }
     } else {
         match (dual_prf_role, previous_prf) {
             (Some(is_low), Some(prev)) if prev.velocity_mps.len() == raw_velocity_mps.len() => {
                 let (prt_low, prt_high, v_a1, v_a2, v_ext) = dual_prf_split(config);
+                let v_a1 = v_a1 * alt_scale;
+                let v_a2 = v_a2 * alt_scale;
+                let v_ext = v_ext * alt_scale;
                 // El rol de `prev` es el opuesto del de este radial (si no,
                 // `prev.prf_div == radial.prf_div` y no se habría llegado aquí
                 // — ver `dual_prf_role`). Se reescala su velocidad guardada al
@@ -1532,10 +1588,18 @@ pub fn build_moment_ray(
         // doblado (PRF efectiva a la mitad, `docs/algorithms/
         // polarimetria-covarianzas.md` §"Configuraciones cubiertas"), así
         // que la Nyquist sale reducida a la mitad sin rama aparte.
-        // Combinación alternante + `DUAL_PRF`/`STAGGERED_PRT` sin
-        // contrastar — ninguna de esas dos ramas usa `own_prt_for_main`.
+        // DUAL_PRF + alternante: `v_ext` (de [`dual_prf_split`]) asume el PRT
+        // SIN doblar, igual que `v_a1`/`v_a2` en `dealiased_velocity_mps` —
+        // mismo `alt_scale` (ver su doc-comment más arriba).
+        // STAGGERED_PRT + alternante: la extensión de Nyquist no aplica en
+        // absoluto (ver el doc-comment junto a `dealiased_velocity_mps`) —
+        // se publica la Nyquist de PRT único `own_prt_for_main`, la misma
+        // base de plegado que la velocidad publicada en ese caso.
         nyquist_velocity: match config.dealias_mode {
-            dealias_mode::DUAL_PRF => dual_prf_split(config).4 as f32,
+            dealias_mode::DUAL_PRF => (dual_prf_split(config).4 * alt_scale) as f32,
+            dealias_mode::STAGGERED_PRT if alternating => {
+                (wavelength_m / (4.0 * own_prt_for_main)) as f32
+            }
             dealias_mode::STAGGERED_PRT => staggered_prt_split(config).4 as f32,
             _ => (wavelength_m / (4.0 * own_prt_for_main)) as f32,
         },
@@ -2476,6 +2540,128 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dual_prf_pair_unfolds_velocity_with_alternating_polarization() {
+        // Mismo par PRT que `dual_prf_pair_unfolds_velocity_across_two_radials`
+        // (1.2ms/0.8ms, razón 2:3) pero con polarización alternante: la
+        // subserie copolar H de cada radial (`main_channel`) tiene el PRT
+        // DOBLADO (`own_prt_for_main`), así que su propia Nyquist se reduce a
+        // la mitad — v_a1≈10.42 m/s, v_a2≈15.63 m/s, v_ext≈31.25 m/s (mitad
+        // de los valores del test sin alternar, ver `alt_scale` en
+        // `build_moment_ray`). v_true=12 m/s se pliega en el radial de PRF
+        // baja (>10.42) pero no en el de PRF alta (<15.63): sólo se
+        // recupera bien si `dealiased_velocity_mps` usa la ventana de
+        // plegado ESCALADA — con la ventana sin escalar (el bug de antes) el
+        // teorema chino del resto reconcilia mal una fase que ya venía
+        // plegada al doble de Nyquist de lo que asumía.
+        const V_TRUE: f64 = 12.0;
+        const WAVELENGTH_M: f64 = 0.10;
+        const PRT_LOW: f64 = 1.2e-3;
+        const PRT_HIGH: f64 = 0.8e-3;
+        const N_H_PULSES: usize = 32;
+
+        let mut config = dual_prf_config();
+        config.polarization_mode = polarization_mode::ALTERNATING;
+        config.antenna_isolation_db = 30.0;
+
+        // Serie H,V,H,V,… (paridad par = tx H): la copolar H sale a PRT
+        // uniforme `own_prt_h_s` (doble del propio PRT del rol). Los pulsos
+        // V son relleno sin uso: `moment_mask` no pide ZDR/ρHV/ΦDP.
+        fn alternating_channel(
+            own_prt_h_s: f64,
+            wavelength_m: f64,
+            v_true: f64,
+        ) -> (Vec<Complex64>, Vec<u8>) {
+            let h_series = generate_coherent_staggered_channel(
+                1.0,
+                v_true,
+                wavelength_m,
+                own_prt_h_s,
+                own_prt_h_s,
+                N_H_PULSES,
+            );
+            let mut ch0 = Vec::with_capacity(N_H_PULSES * 2);
+            let mut ray_flags = Vec::with_capacity(N_H_PULSES * 2);
+            for &s in &h_series {
+                ch0.push(s);
+                ray_flags.push(0);
+                ch0.push(Complex64::new(0.3, 0.0));
+                ray_flags.push(tx_ray_flag::TX_POL_V);
+            }
+            (ch0, ray_flags)
+        }
+
+        fn alternating_dual_prf_radial(
+            prf_div: u32,
+            ch0: Vec<Complex64>,
+            ray_flags: Vec<u8>,
+        ) -> AssembledRadial {
+            let ch1 = ch0.clone();
+            AssembledRadial {
+                seq_start: 1,
+                timestamp_ns_start: 0,
+                trigger_count_start: 0,
+                azimuth_raw: 0,
+                elevation_raw: 0,
+                prf_div,
+                pulse_width_idx: 0,
+                pulse_mode: 0,
+                cell_mode: 0,
+                // RX_1 presente (aunque sin uso real: `moment_mask` no pide
+                // ZDR/ρHV/ΦDP) para que `v_channel_idx` sea `Some` y
+                // `alternating` se active — igual que exige el cableo real.
+                channel_mask: 0b0011,
+                channels: vec![vec![ch0], vec![ch1]],
+                ray_flags,
+                dropped_pulses: 0,
+            }
+        }
+
+        let (ch0_low, flags_low) = alternating_channel(PRT_LOW * 2.0, WAVELENGTH_M, V_TRUE);
+        let radial_low = alternating_dual_prf_radial(3, ch0_low, flags_low); // mayor divisor = PRF baja
+
+        let (ch0_high, flags_high) = alternating_channel(PRT_HIGH * 2.0, WAVELENGTH_M, V_TRUE);
+        let radial_high = alternating_dual_prf_radial(2, ch0_high, flags_high); // menor divisor = PRF alta
+
+        let (_, previous_prf) =
+            build_moment_ray(&radial_low, &config, 1, false, 1_000_000, 0.0, None);
+        let (msg2, _) = build_moment_ray(
+            &radial_high,
+            &config,
+            2,
+            false,
+            1_000_000,
+            0.0,
+            Some(&previous_prf),
+        );
+        let UpMessage::MomentRay { ray, moments } = msg2 else {
+            panic!("se esperaba MomentRay");
+        };
+        assert_eq!(
+            ray.ray_flags & ray_flag::DEALIAS_FAILED,
+            0,
+            "segundo radial del par sí debería poder desdoblar"
+        );
+        let v_published = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::V)
+            .expect("falta el bloque de V")
+            .values[0] as f64;
+        assert!(
+            (v_published - V_TRUE).abs() < 2.0,
+            "V desdoblado ({v_published}) debería acercarse a v_true={V_TRUE}"
+        );
+
+        // v_ext escalado a la mitad (31.25 m/s, no 62.5): confirma que
+        // `nyquist_velocity` también usa `alt_scale`, no sólo el desdoblado.
+        let expected_nyquist = 31.25f32;
+        let published_nyquist = ray.nyquist_velocity;
+        assert!(
+            (published_nyquist - expected_nyquist).abs() < 0.5,
+            "nyquist_velocity ({published_nyquist}) debería ser ~{expected_nyquist} m/s (v_ext escalado por alternante)"
+        );
+    }
+
     fn generate_channel(cells: &[CellParams], rng: &mut StdRng) -> Vec<Vec<Complex64>> {
         cells.iter().map(|c| generate_cell(c, rng)).collect()
     }
@@ -2914,6 +3100,112 @@ mod tests {
                 "V desdoblado ({v}) debería acercarse a v_true={V_TRUE}"
             );
         }
+    }
+
+    #[test]
+    fn staggered_prt_alternating_degrades_to_single_prt_without_cross_pol_contamination() {
+        // STAGGERED_PRT + alternante: el teorema chino del resto no aplica
+        // (ver el doc-comment junto a `dealiased_velocity_mps` en
+        // `build_moment_ray`) — la subserie copolar H (paridad par, tx H)
+        // queda con PRT único `own_prt_for_main` (≈`T1+T2`), no con el
+        // patrón `T1,T2` alternado. Este test comprueba las dos mitades del
+        // hallazgo: (1) el valor publicado se acerca a v_true, degradado
+        // pero sin pánico ni basura, con la Nyquist de PRT único (no la
+        // extendida); (2) el bug que este cableo evita era real — llamar la
+        // técnica staggered directamente sobre la serie SIN partir por
+        // polarización (lo que hacía el código antes del fix) contamina la
+        // fase con los pulsos V, un tono fuerte deliberadamente sin relación
+        // con v_true.
+        const V_TRUE: f64 = 6.0;
+        const WAVELENGTH_M: f64 = 0.10;
+        const T1: f64 = 0.8e-3;
+        const T2: f64 = 1.2e-3;
+        const N_H_PULSES: usize = 32;
+
+        let mut config = staggered_prt_config();
+        config.polarization_mode = polarization_mode::ALTERNATING;
+        config.antenna_isolation_db = 30.0;
+        let own_prt_h_s = 2.0 / config.prf_hz as f64; // = mean_prt_s * 2
+
+        let h_series = generate_coherent_staggered_channel(
+            1.0,
+            V_TRUE,
+            WAVELENGTH_M,
+            own_prt_h_s,
+            own_prt_h_s,
+            N_H_PULSES,
+        );
+        // Tono fuerte y desfasado, deliberadamente sin relación con v_true —
+        // mismo criterio que ya usan los tests de espectral/clutter
+        // alternante (`alternating_ray_flags`+relleno) para exhibir
+        // contaminación cruzada si el cableo no partiera bien.
+        let v_filler: Vec<Complex64> = (0..N_H_PULSES)
+            .map(|i| Complex64::from_polar(5.0, 2.7 * i as f64))
+            .collect();
+
+        let mut ch0 = Vec::with_capacity(N_H_PULSES * 2);
+        let mut ray_flags = Vec::with_capacity(N_H_PULSES * 2);
+        for i in 0..N_H_PULSES {
+            ch0.push(h_series[i]);
+            ray_flags.push(0);
+            ch0.push(v_filler[i]);
+            ray_flags.push(tx_ray_flag::TX_POL_V);
+        }
+        // Segundo canal (RX_1) requerido para que `alternating` se active
+        // (igual que el cableo real) — su contenido no importa, `moment_mask`
+        // no pide ZDR/ρHV/ΦDP.
+        let ch1 = ch0.clone();
+
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: 0b0011,
+            channels: vec![vec![ch0.clone()], vec![ch1]],
+            ray_flags,
+            dropped_pulses: 0,
+        };
+
+        let (msg, _) = build_moment_ray(&radial, &config, 1, false, 1_000_000, 0.0, None);
+        let UpMessage::MomentRay { ray, moments } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        assert_eq!(
+            ray.ray_flags & ray_flag::DEALIAS_FAILED,
+            0,
+            "degradado a PRT único, no 'falla' en el sentido de DEALIAS_FAILED"
+        );
+        let v_published = moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::V)
+            .expect("falta el bloque de V")
+            .values[0] as f64;
+        assert!(
+            (v_published - V_TRUE).abs() < 2.0,
+            "V publicado ({v_published}) debería acercarse a v_true={V_TRUE} sin contaminación cruzada"
+        );
+
+        let expected_nyquist = (WAVELENGTH_M / (4.0 * own_prt_h_s)) as f32;
+        let published_nyquist = ray.nyquist_velocity;
+        assert!(
+            (published_nyquist - expected_nyquist).abs() < 0.1,
+            "nyquist_velocity ({published_nyquist}) debería ser la de PRT único ({expected_nyquist}), no la extendida"
+        );
+
+        // Confirma que el bug evitado era real: la técnica staggered
+        // aplicada directamente sobre la serie intercalada SIN partir por
+        // polarización se contamina con los pulsos V.
+        let (v1_naive, v2_naive) = staggered_pulse_pair_velocities(&ch0, WAVELENGTH_M, T1, T2);
+        assert!(
+            (v1_naive - V_TRUE).abs() > 1.0 || (v2_naive - V_TRUE).abs() > 1.0,
+            "la técnica sobre la serie intercalada sin partir debería contaminarse (v1={v1_naive}, v2={v2_naive})"
+        );
     }
 
     #[test]

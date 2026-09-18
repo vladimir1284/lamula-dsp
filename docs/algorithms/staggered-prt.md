@@ -48,12 +48,20 @@ staggered-PRT es más caro de implementar bien que el dual-PRF.
 
 Requiere que el DRx sepa generar el patrón de disparo escalonado —el contrato
 `DRx↔DSP` lo permite mediante los cuatro pares de `trigger_delay_N` y
-`trigger_width_N`— y no depende del tipo de transmisor ni de la polarimetría. En
-configuración polarimétrica alternante, sin embargo, la combinación de
-alternancia de polarización y alternancia de periodo genera un patrón de
-muestreo cuya estadística hay que analizar antes de comprometerla: no se
-recomienda ofrecer las dos a la vez en Stage 1, y la restricción se declara vía
-`dealias_mask` y `capability_flags`.
+`trigger_width_N`— y no depende del tipo de transmisor. Con polarimetría
+alternante, en cambio, **la extensión de Nyquist de esta técnica no es
+alcanzable, no sólo "arriesgada"** (`docs/algorithms/roadmap.md` §"alternante +
+DUAL_PRF/STAGGERED_PRT", cerrado 2026-09-18): H y V alternan pulso a pulso
+atados al mismo índice que T1/T2, así que la subserie copolar H sólo toma uno
+de cada dos pulsos, separados uniformemente por `T1+T2` — el patrón T1,T2
+alternado que el teorema chino del resto necesita para reconciliar dos
+Nyquist distintas desaparece dentro de esa subserie. `crates/service::ray`
+degrada deliberadamente a la velocidad de PRT único sin desdoblar en esta
+combinación (Nyquist reducida en proporción, no la extendida), en vez de
+publicar basura o entrar en pánico — sin bandera de contrato nueva que la
+distinga de un staggered-PRT normal. Sigue siendo cierto que **no conviene
+ofrecerla activamente al operador** como si fuese staggered-PRT completo: es
+un PRT único con otro nombre.
 
 ## Parámetros del contrato que consume
 

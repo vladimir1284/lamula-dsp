@@ -18,13 +18,17 @@ El módulo de **Dealiasing** del pipeline (ver el plan de LAMULA DSP) implementa
 
 ## Configuraciones cubiertas
 
-Independiente del tipo de transmisor. Con polarimetría alternante hay que
-analizar la interacción antes de ofrecer las dos cosas a la vez: la alternancia
-de polarización ya reduce a la mitad las muestras por canal, y combinarla con
-alternancia de PRF deja bloques de muestras demasiado cortos para una estimación
-estable. La restricción, si se adopta, se declara en `dealias_mask` y
-`capability_flags` en vez de dejarse a que el operador descubra que la
-combinación no funciona.
+Independiente del tipo de transmisor. Con polarimetría alternante el
+desdoblado sigue siendo matemáticamente correcto (`docs/algorithms/roadmap.md`
+§"alternante + DUAL_PRF/STAGGERED_PRT", cerrado 2026-09-18): cada radial
+mantiene un único PRT propio, sólo doblado por la subserie copolar H, y tanto
+la fase como la ventana de plegado del teorema chino del resto se escalan por
+igual (`crates/service::ray`, `alt_scale`). Sigue sin analizarse la
+preocupación estadística original de este párrafo — la alternancia de
+polarización ya reduce a la mitad las muestras por canal, y combinarla con
+alternancia de PRF deja bloques de muestras más cortos para una estimación
+estable, algo distinto de que el mecanismo esté roto — ningún oráculo de este
+repositorio mide esa varianza específica.
 
 ## Parámetros del contrato que consume
 
