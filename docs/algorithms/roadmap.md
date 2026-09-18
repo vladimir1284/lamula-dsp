@@ -895,8 +895,35 @@ ingesta 1GbE real, corriendo contra la salida física de una ZedBoard con `vecto
 (o adicionalmente a) el simulador sintético — validaría el AAL y `crates/ingest` contra timing y
 contrapresión de hardware real sin esperar a la ZU9 ni al frontal analógico (eso sigue sin
 mitigación, es el pendiente P-03 del DRx). Hoy no hay fecha ni item de trabajo para esto en la
-tabla de fases de §8.2 — es un hueco, no una tarea priorizada. Ver el pendiente P-10 en
-`lamula-drx/docs/alcance/pendientes.md` y PEND-RCP-13 en `lamula-rcp/docs/alcance/pendientes.md`.
+tabla de fases de §8.2 — es un hueco, no una tarea priorizada. Ver el pendiente P-13 en
+`lamula-drx/docs/alcance/pendientes.md` y PEND-RCP-13/PEND-RCP-14 en
+`lamula-rcp/docs/alcance/pendientes.md`.
+
+**Plan por fases (2026-09-17)**, del pendiente P-13 de `lamula-drx`, con lo que le toca a este
+proyecto en cada una:
+
+- **Fase A** (cadena DRx sola) y **Fase B** (DSP real contra tráfico real, vector fijo/manual, sin
+  RCP todavía) son las que abren el hueco de arriba: apuntar `crates/ingest` contra la salida física
+  de una ZedBoard corriendo `vector_source`, en vez de (o adicionalmente a) el simulador sintético
+  de M1.
+- **Beneficio que no es solo "conectar tuberías":** el método de oráculo de este documento (§"Método
+  de estudio: oráculo en Python, luego Rust") solo compara contra verdad-terreno analítica generada
+  en software. Un tono conocido que pasó por cuantización de punto fijo *real* en la FPGA introduce
+  una fuente de error que el simulador sintético no tiene — interacción del ruido de cuantización de
+  hardware con la estimación de momentos. Vale la pena tratarlo como un tercer nivel del método de
+  oráculo (Python → Rust → hardware real) cuando llegue el momento, no solo como prueba de
+  integración.
+- **Fase C** (RCP real contra este DSP real) no le toca a este proyecto construirla, pero si el RCP
+  cablea el consumo de `status`/`bite_event` de este contrato (PEND-RCP-14 de `lamula-rcp`), esta
+  ingesta real es la que produciría esos eventos con datos de hardware de verdad en vez de nunca
+  emitirlos.
+- **Fase D** — decisión del usuario (2026-09-17): la selección remota de señal de prueba desde el
+  RCP es una función BITE **permanente** del operador, no una herramienta de desarrollo desechable.
+  A este proyecto le toca un relay puro: el mensaje `control` de este contrato (`dsp_rcp`, campo
+  `command: u8`, ya extensible sin romper layout) gana un valor de comando nuevo que se reenvía tal
+  cual hacia el mensaje nuevo que el DRx tiene que diseñar en su propio contrato (`test_stimulus_select`,
+  ver P-13 de ese proyecto) — no toca el pipeline de moments. Pendiente de que el DRx cierre su ADR
+  propio antes de tocar ningún schema; este proyecto no decide esa forma unilateralmente.
 
 ## Referencias abiertas / implementaciones libres
 
