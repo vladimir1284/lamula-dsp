@@ -914,6 +914,52 @@ y la propia combinación STAGGERED_PRT + alternante sigue siendo, por diseño de
 polarización Y periodo de muestreo a la vez) — este cierre la deja con comportamiento correcto y documentado, no
 la promueve a caso de uso soportado activamente.
 
+**2026-09-18: corrección de atenuación Z-PHI — verificada contra el paper original de Testud et al. (2000), ya
+no pendiente.** El bloqueo que dejaba abierta la nota de "Qué significa exactamente CZ" más arriba ("fórmula
+reconstruida de memoria... verificada contra Py-ART pero no contra el paper original de Testud, sin acceso a él
+en este entorno") se cerró porque el usuario aportó el PDF directamente. La fórmula de `crates/attenuation`
+coincide exactamente con las ecuaciones (19)/(20)/(23)/(24) del paper; la corrección de reflectividad que
+implementa el crate (integración numérica de `A(r)`, no la forma cerrada de la Ec. 25) se verificó equivalente
+a esa ecuación por derivación directa (diferenciando la Ec. 19 se recupera la Ec. 25 exactamente); la identidad
+de autoconsistencia también sale directamente de la Ec. (21) del paper, no sólo de la propia fórmula contra sí
+misma. Detalle en `docs/algorithms/atenuacion-zphi.md` §"Cómo funciona". Cambio de sólo documentación en este
+punto (`docs/algorithms/atenuacion-zphi.md`, doc-comment de `crates/attenuation/src/lib.rs`, `tools/oracles/
+atenuacion_zphi.ipynb`); ningún cambio de código ni de coeficientes todavía — la fórmula ya era correcta, sólo
+estaba sin verificar contra la fuente primaria.
+
+**2026-09-18 (mismo día, corrección de alcance): la instalación de referencia es banda S, no banda C — el
+"no bloquea Stage 1" del párrafo anterior estaba mal fundado, y con él el hallazgo de esa verificación SÍ
+aplicaba de entrada.** El propio paper (Tabla 1c, §"A more accurate formulation") advierte que la "formulación
+simple" (`A = a_coef·KDP`, forzando a 1 el exponente de la relación KDP-A) es razonable en X/C band
+(`b≈0.97-0.99` en su Tabla 1) pero NO en banda S (`b≈1.18`) — banda S necesita la formulación acoplada
+(Ecs. 26-27). Implementada: `crates/attenuation` gana `zphi_specific_attenuation_accurate`/
+`zphi_correct_dbz_accurate`, que resuelven `A(r0)` y el intercepto normalizado de la DSD `N*₀` como sistema
+acoplado (Ec. 26 despeja `N*₀` de la relación A-Z en el extremo de referencia, Ec. 27 impone la restricción de
+ΔΦDP vía la relación KDP-A) por bisección numérica sobre `A(r0)` — sin forma cerrada, el paper mismo dice
+"puede resolverse con una técnica numérica estándar" sin dar una. Contrastado contra un caso de modelo acoplado
+con los coeficientes de banda S de la Tabla 1 del propio paper (canal H: `β_AZ=0.701`/`a_AZ=9.28e-8` Tabla 1a,
+`β_KDP=1.18`/`a_KDP=1.31e3` Tabla 1c) en `crates/attenuation::tests` (sesgo < 0.01 dB, y test dedicado que
+confirma que la formulación simple con los defaults de Gu et al. 2011 se degrada > 5× peor sobre la misma
+verdad-terreno de banda S — la predicción del paper, no una suposición). Cableado en `crates/service::ray`:
+las constantes locales `ZPHI_BETA`/`ZPHI_A_COEF_DB_PER_DEG` (banda C, Gu et al. 2011) se reemplazan por
+`ZPHI_BETA_AZ_S_BAND`/`ZPHI_A_AZ_S_BAND`/`ZPHI_BETA_KDP_S_BAND`/`ZPHI_A_KDP_S_BAND` (banda S, Tabla 1 de Testud
+et al. directamente), y el sitio de llamada usa `zphi_correct_dbz_accurate` en vez de `zphi_correct_dbz`.
+
+**Hallazgo real al escribir el test de cableo, no anticipado**: la formulación acorde exige que la atenuación y
+el KDP "verdaderos" del escenario de prueba sean consistentes entre sí vía el MISMO `N*₀` a través de la Tabla
+1a (relación A-Z) — la formulación simple sólo exige que `A_true` y `ΔΦDP_true` sean consistentes vía `a_coef`,
+sin ninguna relación con `Z_true`. Un primer intento del test de `crates/service::ray` fijó `A_true=0.3 dB/km`
+como constante libre, sin relación con `Z_true=30 dBZ` vía la Tabla 1a: consistente con la Ec. 27, pero
+implicando para la Ec. 26 un `N*₀` de orden 10¹⁴ (absurdo frente al ~8×10⁶ de Marshall-Palmer que la Ec. 27
+asumía) — el solver, sin `A(r0)` que satisficiera las dos ecuaciones a la vez para el `Za` medido, sobrecorregía
+(~43 dBZ recuperados en vez de 30, peor que no corregir nada). Corregido generando `A_true`/`KDP_true` los dos
+a partir de `Z_true` vía las Tablas 1a/1c con el mismo `N*₀`, y subiendo `Z_true` a 55 dBZ (núcleo convectivo
+intenso) sobre un tramo de 15 km — banda S atenúa mucho menos que C/X para el mismo Z (ver la tabla de
+`docs/algorithms/atenuacion-zphi.md`), así que hace falta un escenario más extremo que el de banda C original
+para obtener una PIA medible en un test unitario. Detalle completo en `docs/algorithms/atenuacion-zphi.md`
+§"Cómo funciona". `cargo build`/`cargo test --workspace`/`cargo clippy --all-targets -- -D warnings`/`cargo fmt
+--check` en verde.
+
 ## Abierto (cross-proyecto): banco de pruebas extremo a extremo contra ZedBoard real
 
 Identificado en revisión de integración cruzada, 2026-09-17. Dueño: los tres equipos (DRx + DSP +

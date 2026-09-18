@@ -164,7 +164,7 @@
 //! en `uz_values`/`v_values`/`cz_values` cuando llegan a este bloque: no
 //! hay nada que recuperar aparte, sólo decidir no censurarlas. La distinción
 //! magnetrón/coherente vive en la constante local `MAGNETRON_TRANSMITTER`,
-//! mismo tipo de hueco que `ZPHI_A_COEF_DB_PER_DEG`, porque en transmisor
+//! mismo tipo de hueco que `ZPHI_A_KDP_S_BAND`, porque en transmisor
 //! coherente el segundo trip es igual de determinista que el primero y
 //! corregir con la fase de éste no decorrelaciona nada — ahí sigue aplicando
 //! sólo detección y marcado. `range_dealias_mode::SZ_8_64` (v0.3 del
@@ -178,7 +178,7 @@
 //! este bloque: no se censura ni se recupera nada, exactamente como si
 //! `range_dealias_mode` fuera `NONE`.
 
-use lamula_attenuation::zphi_correct_dbz;
+use lamula_attenuation::zphi_correct_dbz_accurate;
 use lamula_burst::{burst_phase_estimate, correct_phase};
 use lamula_calibration::power_to_dbz;
 use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
@@ -248,23 +248,29 @@ const DUAL_PRF_MAX_FOLD_SEARCH: i64 = 3;
 /// `tools/oracles/gmap_clutter_filtering.ipynb`.
 const GMAP_SIGNAL_MARGIN: f64 = 3.0;
 
-/// Exponente `β` de la relación de acoplamiento atenuación-KDP que asume
-/// `lamula_attenuation::zphi_correct_dbz` (`docs/algorithms/
-/// atenuacion-zphi.md`) — NO es un campo de `Config`, mismo tipo de hueco
-/// que `KDP_WINDOW_GATES`. 0.64884 es el valor que documenta Gu et al.
-/// (2011) y usa Py-ART (`pyart.correct.calculate_attenuation_zphi`), común a
-/// las tres bandas de su tabla de coeficientes — ver el doc-comment del
-/// crate para el porqué (no hay acceso al paper original en este entorno).
-const ZPHI_BETA: f64 = 0.64884;
-
-/// Coeficiente de acoplamiento atenuación-fase `a_coef` [dB/grado] de
-/// `lamula_attenuation::zphi_correct_dbz`, banda C (0.08, Gu et al. 2011 vía
-/// Py-ART) — el contrato v0.1 no tiene un campo de banda del radar con que
-/// elegir S/C/X automáticamente a partir de `wavelength_m` (mismo tipo de
-/// hueco que `polarization_mode`, ver `docs/algorithms/roadmap.md`
-/// §"Decisiones cerradas"); banda C es el valor por defecto declarado hasta
-/// que exista ese campo o una constante de configuración local real.
-const ZPHI_A_COEF_DB_PER_DEG: f64 = 0.08;
+/// Coeficientes de Testud et al. (2000), Tabla 1, canal H, **banda S** —
+/// instalación de referencia de este repositorio (corregido 2026-09-18: se
+/// documentaba banda C por error, sin verificar contra la instalación real).
+/// El contrato v0.1 no tiene un campo de banda del radar con que elegir
+/// S/C/X automáticamente a partir de `wavelength_m` (mismo tipo de hueco que
+/// `polarization_mode`, ver `docs/algorithms/roadmap.md` §"Decisiones
+/// cerradas"): constantes locales de instalación hasta que exista ese campo.
+///
+/// Banda S usa la "formulación más precisa" de
+/// `lamula_attenuation::zphi_correct_dbz_accurate` (Ecs. 26-27 del paper),
+/// NO la formulación simple (`zphi_correct_dbz`, Ecs. 19-24, que fuerza a 1
+/// el exponente de la relación KDP-A): el propio paper (Tabla 1c, §"A more
+/// accurate formulation") advierte que ese forzado es razonable en X/C band
+/// (`b≈0.97-0.99`) pero no en banda S (`b≈1.18`) — ver el doc-comment de
+/// `lamula_attenuation` y `docs/algorithms/atenuacion-zphi.md` §"Cómo
+/// funciona". Estos cuatro valores, a diferencia de los que usaba la
+/// formulación simple (Gu et al. 2011 vía Py-ART), vienen directamente de la
+/// Tabla 1 del propio Testud et al. (2000) — consultado en esta sesión, ver
+/// `docs/algorithms/roadmap.md`.
+const ZPHI_BETA_AZ_S_BAND: f64 = 0.701; // Tabla 1a
+const ZPHI_A_AZ_S_BAND: f64 = 9.28e-8; // Tabla 1a
+const ZPHI_BETA_KDP_S_BAND: f64 = 1.18; // Tabla 1c
+const ZPHI_A_KDP_S_BAND: f64 = 1.31e3; // Tabla 1c
 
 /// Tipo de transmisor de la instalación (`docs/algorithms/roadmap.md`
 /// §"Decisiones cerradas" ítem "`range_dealias` sin SZ"): `true` = magnetrón
@@ -278,7 +284,7 @@ const ZPHI_A_COEF_DB_PER_DEG: f64 = 0.08;
 /// coherente el segundo trip es igual de determinista que el primero y esa
 /// misma corrección no decorrelaciona nada, sólo censura tiene sentido. El
 /// contrato no tiene campo de hardware con que decidir esto (mismo tipo de
-/// hueco que `ZPHI_A_COEF_DB_PER_DEG`): constante local de instalación hasta
+/// hueco que `ZPHI_A_KDP_S_BAND`): constante local de instalación hasta
 /// que exista uno.
 const MAGNETRON_TRANSMITTER: bool = true;
 
@@ -1326,11 +1332,13 @@ pub fn build_moment_ray(
                 if i - start >= 2 {
                     let z_dbz: Vec<f64> = cz_values[start..i].iter().map(|&v| v as f64).collect();
                     let delta_phidp = phidp_unwrapped[i - 1] - phidp_unwrapped[start];
-                    let corrected = zphi_correct_dbz(
+                    let corrected = zphi_correct_dbz_accurate(
                         &z_dbz,
                         gate_spacing_km,
-                        ZPHI_BETA,
-                        ZPHI_A_COEF_DB_PER_DEG,
+                        ZPHI_BETA_AZ_S_BAND,
+                        ZPHI_A_AZ_S_BAND,
+                        ZPHI_BETA_KDP_S_BAND,
+                        ZPHI_A_KDP_S_BAND,
                         delta_phidp,
                     );
                     for (dst, v) in cz_values[start..i].iter_mut().zip(corrected) {
@@ -2352,25 +2360,41 @@ mod tests {
 
     #[test]
     fn zphi_correction_recovers_attenuated_cz_on_dual_channel_radial() {
-        // Perfil de Z verdadero constante (30 dBZ) atenuado con A verdadero
-        // constante (perfil de Z constante -> atenuación constante en el
-        // modelo Z-A acoplado) y ΔΦDP acorde a `ZPHI_A_COEF_DB_PER_DEG`,
-        // generado a través de IQ dual-pol real por celda -- misma técnica
-        // que `kdp_window_fit_recovers_slope_from_dual_channel_radial`, pero
-        // con potencia variable en vez de constante para que la ecuación del
-        // radar por sí sola NO explique el CZ recuperado.
+        // Perfil de Z verdadero constante -- núcleo convectivo intenso, 55
+        // dBZ, necesario para que la atenuación de banda S (mucho más chica
+        // que en C/X para el mismo Z, ver `docs/algorithms/
+        // atenuacion-zphi.md`) acumule una PIA medible en un tramo de
+        // longitud razonable para un test unitario. A diferencia de la
+        // versión de este test previa a la formulación acorde (que fijaba
+        // A verdadero como constante LIBRE, sin relación con Z verdadero),
+        // aquí A_true y KDP_true se DERIVAN de Z_true vía las relaciones de
+        // la Tabla 1 de Testud et al. (2000) (A-Z para A_true, KDP-A para
+        // KDP_true), con el MISMO `N*₀` en las dos -- la formulación acorde
+        // (a diferencia de la simple) exige esa consistencia conjunta (Ecs.
+        // 26-27, ver el doc-comment de `lamula_attenuation`): un A_true
+        // libre, sin relación con Z_true vía `N*₀`, no tiene solución
+        // consistente con la Tabla 1a y el solver converge a un A(r0)
+        // equivocado (hallazgo real al escribir este test: la versión
+        // anterior, con A_true=0.3 dB/km desacoplado de Z_true=30 dBZ,
+        // sobrecorregía a ~43 dBZ en vez de recuperar 30).
         use lamula_calibration::dbz_to_power;
 
         const GATE_SPACING_KM: f64 = 0.150;
-        const N_GATES: usize = 40;
+        const N_GATES: usize = 100;
         const RADAR_CONSTANT_DB: f64 = -20.0;
         const START_RANGE_KM: f64 = 5.0;
-        const Z_TRUE_DBZ: f64 = 30.0;
-        const A_TRUE_DB_PER_KM: f64 = 0.3;
+        const Z_TRUE_DBZ: f64 = 55.0;
+        const N0_STAR_ASSUMED: f64 = 0.8e7; // Marshall-Palmer, mismo valor que el paper usa de referencia
 
-        let kdp_true_deg_per_km = A_TRUE_DB_PER_KM / ZPHI_A_COEF_DB_PER_DEG;
+        let z_true_linear = 10f64.powf(Z_TRUE_DBZ / 10.0);
+        let a_true_db_per_km = ZPHI_A_AZ_S_BAND
+            * N0_STAR_ASSUMED.powf(1.0 - ZPHI_BETA_AZ_S_BAND)
+            * z_true_linear.powf(ZPHI_BETA_AZ_S_BAND);
+        let kdp_true_deg_per_km = ZPHI_A_KDP_S_BAND
+            * N0_STAR_ASSUMED.powf(1.0 - ZPHI_BETA_KDP_S_BAND)
+            * a_true_db_per_km.powf(ZPHI_BETA_KDP_S_BAND);
         let far = N_GATES - 5;
-        let uncorrected_bias_db = 2.0 * A_TRUE_DB_PER_KM * far as f64 * GATE_SPACING_KM;
+        let uncorrected_bias_db = 2.0 * a_true_db_per_km * far as f64 * GATE_SPACING_KM;
         assert!(
             uncorrected_bias_db > 2.0,
             "escenario de prueba debería tener atenuación significativa sin corregir: {uncorrected_bias_db} dB"
@@ -2388,7 +2412,7 @@ mod tests {
             let mut v_channel = Vec::with_capacity(N_GATES);
             for i in 0..N_GATES {
                 let range_km = START_RANGE_KM + i as f64 * GATE_SPACING_KM;
-                let two_way_atten_db = 2.0 * A_TRUE_DB_PER_KM * i as f64 * GATE_SPACING_KM;
+                let two_way_atten_db = 2.0 * a_true_db_per_km * i as f64 * GATE_SPACING_KM;
                 let power_s =
                     dbz_to_power(Z_TRUE_DBZ - two_way_atten_db, range_km, RADAR_CONSTANT_DB);
                 let cell = CellParams {

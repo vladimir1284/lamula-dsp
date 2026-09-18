@@ -95,7 +95,7 @@ impl AfcLoop {
 /// `docs/dsp-plan.md` sólo documenta 250 MSPS como reloj del ADC, y nada en
 /// este repositorio confirma si el NCO usa ese mismo reloj o uno derivado.
 /// Mismo tipo de hueco sin campo propio en el contrato que
-/// `MAGNETRON_TRANSMITTER`/`ZPHI_A_COEF_DB_PER_DEG` en `crates/service::ray`
+/// `MAGNETRON_TRANSMITTER`/`ZPHI_A_KDP_S_BAND` en `crates/service::ray`
 /// (ver `docs/algorithms/roadmap.md` §"Decisiones cerradas"): quien llame
 /// tiene que pasar los valores reales del hardware DRx, confirmados contra su
 /// especificación, antes de comisionar contra hardware real — esta función
