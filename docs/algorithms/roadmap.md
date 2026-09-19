@@ -231,9 +231,14 @@ cableado físico de canales, la de este contrato es declarar el modo. Hecho:
 esquema, regeneración de `contract/generated/` (Rust/Python/TS) y los sitios
 manuales que codificaban `Config` byte a byte (`crates/rcp-link/src/wire.rs`
 y los tests de `crates/rcp-link`/`crates/service`). **Sin verificar**:
-`cargo build`/`cargo test` del workspace — este entorno no tiene `cargo`
-disponible; sólo se corrió la batería de contraste de codegen en Python
-(`contract/tests`, 71/71).
+`cargo build`/`cargo test` del workspace — muy probablemente la misma causa
+que se diagnosticó después (ver la nota de rustup en la entrada del
+escenario de BITE, más abajo: toolchain `x86_64` instalado sobre un host
+`aarch64`), aunque esa sesión no lo comprobó; sólo se corrió la batería de contraste de codegen en Python
+(`contract/tests`, 71/71). **Nota posterior, inferencia**: entradas más
+nuevas sí corrieron `cargo test --workspace` en verde sobre estos mismos
+ficheros, así que en la práctica el hueco quedó cubierto — no se re-corrió
+el gate contra este cambio en aislamiento.
 
 **Lo que este campo NO resuelve todavía, y por qué es tarea aparte**: sólo
 declara el modo, no cablea `polarimetric_moments_alternating`/`ldr_db` en
@@ -433,12 +438,15 @@ el entorno. El campo sólo se declara; `ldr_db` sigue sin cablearse en
 autocovarianza pulse-pair siempre, no a `SpectralEstimate`, sin fórmula
 espectral nueva.** `crates/service::ray::gate_quality` marcaba esto como
 "inferencia mía sin respaldo de oráculo" desde el cableo del estimador
-espectral (`b8bcda9`). Revisado sin acceso a `cargo`/`jupyter` en este
-entorno — lo que descarta derivar y validar una fórmula espectral nueva de
-la misma forma que fase 4 ya renunció a improvisar la varianza teórica de
-pulse-pair sin poder contrastarla — se concluye que no hace falta fórmula
-nueva: los tres índices caracterizan la serie cruda/filtrada (coherencia a
-retardo 1, SNR, razón de filtrado), no el algoritmo que luego decide
+espectral (`b8bcda9`). Revisado sin oráculo ejecutable: la imagen no trae
+`jupyter`, así que no hay forma de derivar y validar una fórmula espectral
+nueva como se haría normalmente — misma renuncia que fase 4 ya hizo con la
+varianza teórica de pulse-pair antes que improvisarla sin contrastarla.
+`cargo` sí está disponible y no fue el obstáculo aquí (ver la nota de
+toolchain en la entrada del escenario de BITE); el cambio es de sólo
+documentación y no necesitaba compilar. Se concluye que no hace falta
+fórmula nueva: los tres índices caracterizan la serie cruda/filtrada
+(coherencia a retardo 1, SNR, razón de filtrado), no el algoritmo que decide
 velocidad/potencia publicadas. Definir un "SQI espectral" en términos de la
 potencia del lóbulo principal recortado filtraría un parámetro interno del
 estimador (`DROP_DB`/semiancho máximo de `crates/spectral`) dentro de un
