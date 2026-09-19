@@ -968,6 +968,41 @@ para obtener una PIA medible en un test unitario. Detalle completo en `docs/algo
 §"Cómo funciona". `cargo build`/`cargo test --workspace`/`cargo clippy --all-targets -- -D warnings`/`cargo fmt
 --check` en verde.
 
+**Procedencia simulada en la cabecera — cerrada: es bandera de trama, no capacidad. `DSP↔RCP` v1.2 → v1.3.**
+Si un despliegue se alimenta del simulador o del DRx real era una elección de entorno al arranque que el RCP no
+tenía forma de descubrir. Publicar dato simulado como si fuera observación es el fallo que nadie nota hasta que ya
+está archivado en Level-II con marca de tiempo absoluta, así que el hecho viaja ahora por el cable: bit 0 del byte
+`flags` de la cabecera común, reservado hasta ahora, como `header_flag::simulated_source`.
+
+En la cabecera y no en `capabilities`, por tres razones: llega con cada trama, incluido cada `moment_ray`, así que
+el codificador de Level-II del RCP decide sobre el dato que tiene en la mano en vez de recordar un mensaje
+anterior; sobrevive a un reenganche del RCP a mitad de adquisición; y no obliga a una petición previa. El byte ya
+existía, así que el cambio es aditivo y basta subir `version_minor` (mismo criterio que `burst_window_bins` y
+`request_spectrum` más arriba). La documentación del campo pasa a exigir explícitamente que un lector NO requiera
+que el byte entero valga cero — la redacción de v0.1 ("tiene que valer 0") habría hecho que cualquier bandera
+futura rompiera lectores estrictos.
+
+`encode_up_message` estampa el byte para los siete tipos de mensaje `up` en vez de que lo haga cada codificador:
+las banderas son propiedad del enlace, y ese despachador es el único camino al socket. El servicio lee la variable
+nueva `LAMULA_DSP_SIMULATED_SOURCE` — requerida y sin valor por defecto, igual que el resto de esta config, porque
+adivinar justo ésta mal es el fallo que se está evitando; acepta `true/false`, `1/0`, `yes/no`, `on/off` y nada
+más — y la anuncia al arrancar. Cubierto por dos tests: el enlace estampa la bandera en toda trama `up` sea cual
+sea el tipo de mensaje, y el test de punta a punta, cuyo DRx es falso, comprueba que el `moment_ray` que llega al
+RCP viene marcado como simulado. Verificado tras injertar este cambio (cherry-pick) sobre el re-vendorizado `DRx↔DSP` v0.3 → v0.4
+(los dos contratos conviven en `crates/contract/tests/layout.rs`): `cargo fmt --check`/`cargo clippy --all-targets
+-- -D warnings` limpios y `cargo test --workspace` en verde, 280 tests en 79 binarios, 0 fallos, sobre host
+`x86_64`.
+
+**Lo que esto NO resuelve**: del lado del RCP nadie lee la bandera todavía — que el codificador de Level-II la
+honre es trabajo de ese proyecto, no de éste, y este contrato sólo garantiza que el dato está ahí. La procedencia
+es global al despliegue, no por fuente: una sola config booleana, así que un montaje mixto (parte simulado, parte
+DRx real en el mismo servicio) no se puede expresar — no hace falta hoy, y el campo no lo impide mañana porque
+quedan siete bits. `capabilities` no cambia, así que un RCP que sólo mire capacidades sigue sin enterarse; es
+deliberado, la procedencia no es una capacidad. **Riesgo de compatibilidad, inferencia no comprobada contra el
+RCP**: un lector construido contra la redacción vieja del campo que valide `flags == 0` rechazará toda trama de un
+despliegue simulado; conviene confirmar con el equipo de RCP que ningún build desplegado haga esa comprobación
+antes de encender `LAMULA_DSP_SIMULATED_SOURCE=true` contra un RCP existente.
+
 ## Abierto (cross-proyecto): banco de pruebas extremo a extremo contra ZedBoard real
 
 Identificado en revisión de integración cruzada, 2026-09-17. Dueño: los tres equipos (DRx + DSP +
