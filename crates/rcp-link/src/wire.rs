@@ -56,18 +56,35 @@ pub enum DownMessage {
     SelftestRequest(SelftestRequest),
 }
 
+/// Posición del byte de banderas dentro de la cabecera común: `magic` (4) +
+/// `version_major` (1) + `version_minor` (1) + `msg_type` (1).
+const HEADER_FLAGS_OFFSET: usize = 7;
+
 fn write_header(buf: &mut Vec<u8>, msg_type: MsgType, payload_len: u32) {
     buf.extend_from_slice(&MAGIC.to_le_bytes());
     buf.push(VERSION_MAJOR);
     buf.push(VERSION_MINOR);
     buf.push(msg_type as u8);
-    buf.push(0); // flags, reservado en v0.1
+    buf.push(0); // banderas; las estampa encode_up_message
     buf.extend_from_slice(&payload_len.to_le_bytes());
 }
 
-/// Despacha un [`UpMessage`] al codificador correspondiente.
-pub fn encode_up_message(msg: &UpMessage) -> Vec<u8> {
-    match msg {
+/// Despacha un [`UpMessage`] al codificador correspondiente y estampa
+/// `flags` en la cabecera.
+///
+/// Las banderas se ponen aquí y no en cada codificador a propósito: son una
+/// propiedad del enlace, no del mensaje, y este despachador es el único
+/// camino por el que sale un mensaje `up` al socket
+/// (`crate::tcp`). Un codificador llamado directamente —lo hacen los
+/// tests— escribe cero, que es lo correcto para una trama sin procedencia
+/// que declarar.
+///
+/// Hoy la única bandera es `header_flag::SIMULATED_SOURCE`: la fuente de
+/// datos es un simulador y no el DRx real. Viaja en cada trama, incluido
+/// cada `moment_ray`, para que quien archiva pueda decidir sobre el dato que
+/// tiene delante en vez de recordar un mensaje anterior.
+pub fn encode_up_message(msg: &UpMessage, flags: u8) -> Vec<u8> {
+    let mut buf = match msg {
         UpMessage::MomentRay { ray, moments } => encode_moment_ray(ray, moments),
         UpMessage::SpectrumFrame { frame, bins_db } => encode_spectrum_frame(frame, bins_db),
         UpMessage::Status(status) => encode_status(status),
@@ -75,7 +92,9 @@ pub fn encode_up_message(msg: &UpMessage) -> Vec<u8> {
         UpMessage::ConfigAck(ack) => encode_config_ack(ack),
         UpMessage::SelftestResult(result) => encode_selftest_result(result),
         UpMessage::Capabilities(caps) => encode_capabilities(caps),
-    }
+    };
+    buf[HEADER_FLAGS_OFFSET] = flags;
+    buf
 }
 
 /// Codifica un radial de momentos. `moments.len()` tiene que coincidir con

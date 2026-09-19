@@ -507,6 +507,11 @@ class CapabilityFlag:
     IQ_ARCHIVE = 128
     SZ864 = 256
 
+class HeaderFlag:
+    """Banderas de la cabecera común, válidas en cualquier mensaje."""
+
+    SIMULATED_SOURCE = 1
+
 class BiteFlag:
     """Catálogo de fallos del DSP."""
 

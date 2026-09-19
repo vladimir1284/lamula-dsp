@@ -25,7 +25,10 @@ pub struct Header {
     pub version_minor: u8,
     /// Ver la tabla de tipos de mensaje.
     pub msg_type: u8,
-    /// Reservado en v0.1; tiene que valer 0.
+    /// Banderas de trama. Ver la tabla `header_flag`. El bit 0 declara que
+    /// la trama viene de una fuente simulada; los demás siguen reservados y valen 0.
+    /// Un lector no debe exigir que el byte entero sea cero: eso rompería con
+    /// cualquier bandera futura.
     pub flags: u8,
     /// Bytes que siguen a ESTA cabecera de 12 B, contando la cabecera del mensaje
     /// más su carga útil variable si la tiene. Un lector de tramas hace por tanto: leer
@@ -662,6 +665,21 @@ pub mod capability_flag {
     pub const IQ_ARCHIVE: u32 = 128;
     /// Recuperación de trip múltiple por codificación de fase SZ(8/64) disponible (exige klistrón/TWT/estado sólido con fase programable). Ver `range_dealias_mode::sz_8_64`.
     pub const SZ864: u32 = 256;
+}
+
+/// Banderas de la cabecera común, válidas en cualquier mensaje.
+///
+/// `simulated_source` es procedencia, no capacidad: dice que los datos de ESTA
+/// trama no vienen de hardware real. Va en la cabecera y no en `capabilities`
+/// a propósito, por tres razones: llega con cada trama, incluido cada
+/// `moment_ray`, así que el codificador de Level-II del RCP puede decidir sobre
+/// el dato que tiene en la mano en vez de recordar un mensaje anterior; no se
+/// pierde si el RCP se reengancha a mitad de adquisición; y no obliga a una
+/// petición previa. Publicar dato simulado como si fuera observación es el fallo
+/// que no se detecta hasta que ya está archivado con marca de tiempo absoluta.
+pub mod header_flag {
+    /// La fuente de datos es un simulador, no el DRx real.
+    pub const SIMULATED_SOURCE: u8 = 1;
 }
 
 /// Catálogo de fallos del DSP.

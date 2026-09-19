@@ -132,6 +132,10 @@ async fn service_binary_wires_drx_to_rcp() {
             .env("LAMULA_DSP_DRX_NCO_WORD_BITS", "32")
             .env("LAMULA_DSP_AFC_TAU_S", "2.0")
             .env("LAMULA_DSP_AFC_AMP_THRESHOLD", "0.01")
+            // Este test alimenta el binario con un DRx de mentira, así que
+            // la procedencia es simulada: la cabecera de cada trama `up`
+            // tiene que salir marcada, y se comprueba más abajo.
+            .env("LAMULA_DSP_SIMULATED_SOURCE", "true")
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()
@@ -225,6 +229,14 @@ async fn service_binary_wires_drx_to_rcp() {
     let mut header = [0u8; HEADER_SIZE];
     rcp.read_exact(&mut header).await.unwrap();
     assert_eq!(header[6], MsgType::MomentRay as u8);
+    // El binario arrancó con LAMULA_DSP_SIMULATED_SOURCE=true: el radial sale
+    // marcado como simulado. Es lo que impide que el RCP lo archive como
+    // observación meteorológica.
+    assert_eq!(
+        header[7],
+        dsp_rcp::header_flag::SIMULATED_SOURCE,
+        "el moment_ray salió sin marca de procedencia simulada"
+    );
     let payload_len = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
     let mut payload = vec![0u8; payload_len];
     rcp.read_exact(&mut payload).await.unwrap();

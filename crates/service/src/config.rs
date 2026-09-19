@@ -30,6 +30,12 @@ pub struct ServiceConfig {
     pub drx_nco_word_bits: u32,
     pub afc_tau_s: f64,
     pub afc_amp_threshold: f64,
+    /// Si la fuente de datos de este despliegue es un simulador y no el DRx
+    /// real. Se estampa en la cabecera de cada mensaje `up`
+    /// (`header_flag::SIMULATED_SOURCE`) para que el RCP no archive dato
+    /// simulado como observación. Sin valor por defecto a propósito, igual
+    /// que el resto: quien despliega tiene que declararlo.
+    pub simulated_source: bool,
 }
 
 #[derive(Debug)]
@@ -53,12 +59,28 @@ impl ServiceConfig {
             drx_nco_word_bits: parse_required("LAMULA_DSP_DRX_NCO_WORD_BITS")?,
             afc_tau_s: parse_required("LAMULA_DSP_AFC_TAU_S")?,
             afc_amp_threshold: parse_required("LAMULA_DSP_AFC_AMP_THRESHOLD")?,
+            simulated_source: parse_bool_required("LAMULA_DSP_SIMULATED_SOURCE")?,
         })
     }
 }
 
 fn required(var: &str) -> Result<String, ConfigError> {
     env::var(var).map_err(|_| ConfigError(format!("falta la variable de entorno {var}")))
+}
+
+/// `bool` no se parsea con `parse_required`: `str::parse::<bool>` sólo acepta
+/// `"true"`/`"false"`, y un fichero de entorno escrito a mano trae `1`, `yes`
+/// o `on` con la misma intención. Se aceptan los tres pares, y cualquier otra
+/// cosa es error — no se adivina.
+fn parse_bool_required(var: &str) -> Result<bool, ConfigError> {
+    let raw = required(var)?;
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => Err(ConfigError(format!(
+            "{var}={raw:?} inválido: se esperaba true/false (también 1/0, yes/no, on/off)"
+        ))),
+    }
 }
 
 fn parse_required<T: std::str::FromStr>(var: &str) -> Result<T, ConfigError>
