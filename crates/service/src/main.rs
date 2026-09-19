@@ -153,7 +153,14 @@ async fn main() {
         .await
         .unwrap_or_else(|e| panic!("no se pudo escuchar RCP en {}: {e}", cfg.rcp_addr));
     println!("RCP escuchando en {}", cfg.rcp_addr);
-    let link = lamula_rcp_link::tcp::spawn(rcp_listener, 16, 16);
+    // Procedencia: se estampa en cada trama `up`, no se anuncia una sola vez.
+    let header_flags = if cfg.simulated_source {
+        println!("AVISO: fuente SIMULADA; las tramas salen marcadas como tal");
+        lamula_contract::dsp_rcp::header_flag::SIMULATED_SOURCE
+    } else {
+        0
+    };
+    let link = lamula_rcp_link::tcp::spawn(rcp_listener, 16, 16, header_flags);
     let mut down = link.down;
     let up = link.up;
 

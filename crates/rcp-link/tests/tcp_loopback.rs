@@ -23,7 +23,7 @@ fn header_bytes(msg_type: MsgType, payload_len: u32) -> Vec<u8> {
 async fn control_frame_from_rcp_arrives_decoded() {
     let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let mut link = lamula_rcp_link::tcp::spawn(listener, 16, 16);
+    let mut link = lamula_rcp_link::tcp::spawn(listener, 16, 16, 0);
 
     let mut client = TcpStream::connect(local_addr).await.unwrap();
     let control = Control {
@@ -51,7 +51,7 @@ async fn control_frame_from_rcp_arrives_decoded() {
 async fn status_sent_up_arrives_on_the_wire() {
     let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let link = lamula_rcp_link::tcp::spawn(listener, 16, 16);
+    let link = lamula_rcp_link::tcp::spawn(listener, 16, 16, 0);
 
     let mut client = TcpStream::connect(local_addr).await.unwrap();
 
@@ -93,10 +93,93 @@ async fn status_sent_up_arrives_on_the_wire() {
     client.read_exact(&mut got).await.unwrap();
 
     assert_eq!(got[6], MsgType::Status as u8);
+    // Enlace montado con banderas 0: procedencia real, byte de banderas limpio.
+    assert_eq!(got[7], 0);
     let payload_len = u32::from_le_bytes(got[8..12].try_into().unwrap());
     assert_eq!(payload_len, dsp_rcp::STATUS_SIZE as u32);
     let uptime = u32::from_le_bytes(got[12..16].try_into().unwrap());
     assert_eq!(uptime, 7);
+
+    drop(link.up);
+    drop(client);
+    link.task.await.unwrap().unwrap();
+}
+
+/// La procedencia viaja en cada trama, no en un anuncio inicial: un enlace
+/// montado con `SIMULATED_SOURCE` marca el byte de banderas de la cabecera de
+/// todos los mensajes `up` que salen por él.
+#[tokio::test]
+async fn simulated_source_flag_is_stamped_on_every_up_frame() {
+    let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
+    let local_addr = listener.local_addr().unwrap();
+    let link =
+        lamula_rcp_link::tcp::spawn(listener, 16, 16, dsp_rcp::header_flag::SIMULATED_SOURCE);
+
+    let mut client = TcpStream::connect(local_addr).await.unwrap();
+
+    // Dos mensajes `up` distintos: la bandera no es de un tipo de mensaje,
+    // es del enlace.
+    let status = Status {
+        uptime_s: 7,
+        phase: dsp_rcp::phase::RUNNING,
+        severity: dsp_rcp::severity::INFO,
+        last_error: 0,
+        n_rx_channels: 1,
+        capability_flags: 0,
+        bite_flags: 0,
+        config_seq: 1,
+        rays_in: 10,
+        rays_out: 10,
+        rays_dropped: 0,
+        queue_depth: 0,
+        bins_ok: 100,
+        bins_total: 100,
+        trigger_period_cmd_ns: 1000,
+        trigger_period_meas_ns: 1000,
+        pad0: 0,
+        noise_floor_dbm_0: -110.0,
+        noise_floor_dbm_1: 0.0,
+        noise_floor_dbm_2: 0.0,
+        noise_floor_dbm_3: 0.0,
+        dc_offset_i_0: 0.0,
+        dc_offset_i_1: 0.0,
+        dc_offset_i_2: 0.0,
+        dc_offset_i_3: 0.0,
+        dc_offset_q_0: 0.0,
+        dc_offset_q_1: 0.0,
+        dc_offset_q_2: 0.0,
+        dc_offset_q_3: 0.0,
+    };
+    link.up.send(UpMessage::Status(status)).await.unwrap();
+
+    let mut got = vec![0u8; HEADER_SIZE + dsp_rcp::STATUS_SIZE];
+    client.read_exact(&mut got).await.unwrap();
+    assert_eq!(got[6], MsgType::Status as u8);
+    assert_eq!(
+        got[7],
+        dsp_rcp::header_flag::SIMULATED_SOURCE,
+        "el status salió sin marcar como simulado"
+    );
+
+    let caps = dsp_rcp::Capabilities {
+        moment_mask: 0,
+        dealias_mask: 0,
+        estimator_mask: 0,
+        max_gates: 1,
+        max_pulses: 1,
+        n_rx_channels: 1,
+        pad0: 0,
+    };
+    link.up.send(UpMessage::Capabilities(caps)).await.unwrap();
+
+    let mut got = vec![0u8; HEADER_SIZE + dsp_rcp::CAPABILITIES_SIZE];
+    client.read_exact(&mut got).await.unwrap();
+    assert_eq!(got[6], MsgType::Capabilities as u8);
+    assert_eq!(
+        got[7],
+        dsp_rcp::header_flag::SIMULATED_SOURCE,
+        "las capacidades salieron sin marcar como simuladas"
+    );
 
     drop(link.up);
     drop(client);

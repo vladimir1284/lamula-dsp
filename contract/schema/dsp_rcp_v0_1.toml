@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 2
+version_minor = 3
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -77,7 +77,10 @@ doc = "Ver la tabla de tipos de mensaje."
 [[header.fields]]
 name = "flags"
 type = "u8"
-doc = "Reservado en v0.1; tiene que valer 0."
+doc = """Banderas de trama. Ver la tabla `header_flag`. El bit 0 declara que
+la trama viene de una fuente simulada; los demás siguen reservados y valen 0.
+Un lector no debe exigir que el byte entero sea cero: eso rompería con
+cualquier bandera futura."""
 
 [[header.fields]]
 name = "payload_len"
@@ -532,6 +535,23 @@ values = [
   { name = "rfi_filter", value = 32, doc = "Filtrado de interferencia de banda estrecha disponible." },
   { name = "spectrum_feed", value = 64, doc = "Analizador de espectro de FI disponible." },
   { name = "iq_archive", value = 128, doc = "Volcado de series temporales crudas disponible." },
+]
+
+[[enum]]
+name = "header_flag"
+type = "u8"
+doc = """Banderas de la cabecera común, válidas en cualquier mensaje.
+
+`simulated_source` es procedencia, no capacidad: dice que los datos de ESTA
+trama no vienen de hardware real. Va en la cabecera y no en `capabilities`
+a propósito, por tres razones: llega con cada trama, incluido cada
+`moment_ray`, así que el codificador de Level-II del RCP puede decidir sobre
+el dato que tiene en la mano en vez de recordar un mensaje anterior; no se
+pierde si el RCP se reengancha a mitad de adquisición; y no obliga a una
+petición previa. Publicar dato simulado como si fuera observación es el fallo
+que no se detecta hasta que ya está archivado con marca de tiempo absoluta."""
+values = [
+  { name = "simulated_source", value = 1, doc = "La fuente de datos es un simulador, no el DRx real." },
 ]
 
 [[enum]]

@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v1.2 — lado RCP y
+Contrato DSP↔RCP v1.3 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 1
-VERSION_MINOR = 2
+VERSION_MINOR = 3
 
 @dataclass
 class Header:
@@ -498,6 +498,11 @@ class CapabilityFlag:
     RFI_FILTER = 32
     SPECTRUM_FEED = 64
     IQ_ARCHIVE = 128
+
+class HeaderFlag:
+    """Banderas de la cabecera común, válidas en cualquier mensaje."""
+
+    SIMULATED_SOURCE = 1
 
 class BiteFlag:
     """Catálogo de fallos del DSP."""

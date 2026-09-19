@@ -52,7 +52,17 @@ pub struct RcpLink {
 /// cada [`UpMessage`] recibido por `up` y lo escribe al socket.
 /// `down_capacity`/`up_capacity` son el backpressure real de cada canal. Ver
 /// el doc del módulo para la semántica de reconexión.
-pub fn spawn(listener: TcpListener, down_capacity: usize, up_capacity: usize) -> RcpLink {
+/// `header_flags` se estampa en la cabecera de cada mensaje `up`. Es una
+/// propiedad del despliegue, no del mensaje: hoy su único bit es
+/// `header_flag::SIMULATED_SOURCE`, que declara que los datos vienen de un
+/// simulador y no del DRx real. Quien monta el enlace lo sabe; los
+/// productores de mensajes, no.
+pub fn spawn(
+    listener: TcpListener,
+    down_capacity: usize,
+    up_capacity: usize,
+    header_flags: u8,
+) -> RcpLink {
     let (down_tx, down_rx) = mpsc::channel(down_capacity);
     let (up_tx, mut up_rx) = mpsc::channel::<UpMessage>(up_capacity);
 
@@ -98,7 +108,7 @@ pub fn spawn(listener: TcpListener, down_capacity: usize, up_capacity: usize) ->
                 loop {
                     match up_rx.recv().await {
                         Some(msg) => {
-                            let bytes = encode_up_message(&msg);
+                            let bytes = encode_up_message(&msg, header_flags);
                             wr.write_all(&bytes).await?;
                         }
                         // Todos los `Sender` (incluido el de `RcpLink::up`)

@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.2 — lado MMI.
+// Contrato DSP↔RCP v1.3 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 2;
+export const VERSION_MINOR = 3;
 
 const LE = true;
 
@@ -27,7 +27,12 @@ export interface Header {
   versionMinor: number;
   /** Ver la tabla de tipos de mensaje. */
   msgType: number;
-  /** Reservado en v0.1; tiene que valer 0. */
+  /**
+   * Banderas de trama. Ver la tabla `header_flag`. El bit 0 declara que
+   * la trama viene de una fuente simulada; los demás siguen reservados y valen 0.
+   * Un lector no debe exigir que el byte entero sea cero: eso rompería con
+   * cualquier bandera futura.
+   */
   flags: number;
   /**
    * Bytes que siguen a ESTA cabecera de 12 B, contando la cabecera del mensaje
@@ -1257,6 +1262,23 @@ export const CapabilityFlag = {
   SPECTRUM_FEED: 64,
   /** Volcado de series temporales crudas disponible. */
   IQ_ARCHIVE: 128,
+} as const;
+
+/**
+ * Banderas de la cabecera común, válidas en cualquier mensaje.
+ *
+ * `simulated_source` es procedencia, no capacidad: dice que los datos de ESTA
+ * trama no vienen de hardware real. Va en la cabecera y no en `capabilities`
+ * a propósito, por tres razones: llega con cada trama, incluido cada
+ * `moment_ray`, así que el codificador de Level-II del RCP puede decidir sobre
+ * el dato que tiene en la mano en vez de recordar un mensaje anterior; no se
+ * pierde si el RCP se reengancha a mitad de adquisición; y no obliga a una
+ * petición previa. Publicar dato simulado como si fuera observación es el fallo
+ * que no se detecta hasta que ya está archivado con marca de tiempo absoluta.
+ */
+export const HeaderFlag = {
+  /** La fuente de datos es un simulador, no el DRx real. */
+  SIMULATED_SOURCE: 1,
 } as const;
 
 /**

@@ -168,7 +168,7 @@ async fn moment_stream_reaches_simulated_rcp_consumer() {
 
     let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let link = lamula_rcp_link::tcp::spawn(listener, 4, 4);
+    let link = lamula_rcp_link::tcp::spawn(listener, 4, 4, 0);
 
     let mut rcp_client = TcpStream::connect(local_addr).await.unwrap();
 
