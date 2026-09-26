@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.3 — lado DSP.
+// Contrato DSP↔RCP v1.4 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 3;
+pub const VERSION_MINOR: u8 = 4;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -220,8 +220,8 @@ pub struct Status {
     pub trigger_period_cmd_ns: u32,
     /// Periodo de disparo medido, ns. La diferencia es la deriva.
     pub trigger_period_meas_ns: u32,
-    /// Relleno explícito; vale 0.
-    pub pad0: u32,
+    /// Frecuencia del burst medida en esta actualización del lazo de AFC (`lamula_burst::AfcUpdate::freq_meas_hz`), sin filtrar. Congelada en el último valor válido mientras `afc_bite` esté a 1. 0 sin lazo de AFC corriendo (sólo magnetrón, `burst_window_bins > 0` en `config`). Consume el relleno explícito v1.3 (`pad0`), mismo tamaño.
+    pub afc_freq_meas_hz: f32,
     /// Suelo de ruido del canal 0, dBm.
     pub noise_floor_dbm_0: f32,
     /// Suelo de ruido del canal 1, dBm.
@@ -246,8 +246,14 @@ pub struct Status {
     pub dc_offset_q_2: f32,
     /// Offset de continua en Q, canal 3.
     pub dc_offset_q_3: f32,
+    /// Offset de frecuencia filtrado que el lazo de AFC aplica esta actualización (`lamula_burst::AfcUpdate::freq_hz`) — el valor de control realmente enviado al NCO del DRx vía el mensaje `Afc` (`nco_phase_inc`). 0 sin lazo de AFC corriendo. Nuevo en v1.4, aditivo.
+    pub afc_control_freq_hz: f32,
+    /// Amplitud media del burst medida esta actualización (`lamula_burst::AfcUpdate::amplitude`). Unidad lineal/relativa del receptor, **no** dBm calibrado — no existe conversión a dBm para este canal en este workspace. 0 sin lazo de AFC corriendo. Nuevo en v1.4, aditivo.
+    pub afc_burst_amplitude: f32,
+    /// 1 si esta actualización del lazo de AFC se congeló por pérdida de burst (`lamula_burst::AfcUpdate::bite`), 0 en otro caso o sin lazo corriendo. La máquina de estados con histéresis (Disabled/Manual/NoBurst/Wait/Track/Locked) no existe todavía — sólo este bit binario. Nuevo en v1.4, aditivo.
+    pub afc_bite: u8,
 }
-pub const STATUS_SIZE: usize = 104;
+pub const STATUS_SIZE: usize = 113;
 
 /// Un suceso de BITE con su instante. Detrás van `text_len` bytes UTF-8 de
 /// texto libre para diagnóstico; el código es lo que se filtra y se historia, el

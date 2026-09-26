@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v1.3 — lado RCP y
+Contrato DSP↔RCP v1.4 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 1
-VERSION_MINOR = 3
+VERSION_MINOR = 4
 
 @dataclass
 class Header:
@@ -150,9 +150,9 @@ class SpectrumFrame:
 class Status:
     """Salud y telemetría. Se emite periódicamente y ante cualquier cambio de"""
 
-    FORMAT = "<IBBBBIIIIIIIIIIIIffffffffffff"
-    SIZE = 104
-    FIELDS = ("uptime_s", "phase", "severity", "last_error", "n_rx_channels", "capability_flags", "bite_flags", "config_seq", "rays_in", "rays_out", "rays_dropped", "queue_depth", "bins_ok", "bins_total", "trigger_period_cmd_ns", "trigger_period_meas_ns", "pad0", "noise_floor_dbm_0", "noise_floor_dbm_1", "noise_floor_dbm_2", "noise_floor_dbm_3", "dc_offset_i_0", "dc_offset_i_1", "dc_offset_i_2", "dc_offset_i_3", "dc_offset_q_0", "dc_offset_q_1", "dc_offset_q_2", "dc_offset_q_3",)
+    FORMAT = "<IBBBBIIIIIIIIIIIfffffffffffffffB"
+    SIZE = 113
+    FIELDS = ("uptime_s", "phase", "severity", "last_error", "n_rx_channels", "capability_flags", "bite_flags", "config_seq", "rays_in", "rays_out", "rays_dropped", "queue_depth", "bins_ok", "bins_total", "trigger_period_cmd_ns", "trigger_period_meas_ns", "afc_freq_meas_hz", "noise_floor_dbm_0", "noise_floor_dbm_1", "noise_floor_dbm_2", "noise_floor_dbm_3", "dc_offset_i_0", "dc_offset_i_1", "dc_offset_i_2", "dc_offset_i_3", "dc_offset_q_0", "dc_offset_q_1", "dc_offset_q_2", "dc_offset_q_3", "afc_control_freq_hz", "afc_burst_amplitude", "afc_bite",)
 
     uptime_s: int = 0
     phase: int = 0
@@ -170,7 +170,7 @@ class Status:
     bins_total: int = 0
     trigger_period_cmd_ns: int = 0
     trigger_period_meas_ns: int = 0
-    pad0: int = 0
+    afc_freq_meas_hz: float = 0.0
     noise_floor_dbm_0: float = 0.0
     noise_floor_dbm_1: float = 0.0
     noise_floor_dbm_2: float = 0.0
@@ -183,6 +183,9 @@ class Status:
     dc_offset_q_1: float = 0.0
     dc_offset_q_2: float = 0.0
     dc_offset_q_3: float = 0.0
+    afc_control_freq_hz: float = 0.0
+    afc_burst_amplitude: float = 0.0
+    afc_bite: int = 0
 
     def pack(self) -> bytes:
         return struct.pack(self.FORMAT, *(getattr(self, name) for name in self.FIELDS))

@@ -68,10 +68,15 @@
 //!   referencia y anchura del acumulador de fase del NCO de recepción del
 //!   DRx) no vienen de ningún contrato de este repositorio — ver el
 //!   doc-comment de `lamula_burst::nco_phase_inc_for_freq_offset` y de
-//!   `crate::config::ServiceConfig`. El congelamiento/BITE que reporta
-//!   `AfcUpdate::bite` ante pérdida de burst no se publica en ningún sitio
-//!   todavía (no hay Status & BITE Manager en este workspace, ver más
-//!   abajo).
+//!   `crate::config::ServiceConfig`. Cada `AfcUpdate` (frecuencia medida sin
+//!   filtrar, offset de control filtrado, amplitud de burst y el bit de
+//!   congelamiento/BITE) sí sale del proceso: `crate::build_status` lo
+//!   vuelca en los cuatro campos `afc_*` de `Status` (contrato v1.4), a la
+//!   última actualización recibida — `0` en los cuatro mientras no haya lazo
+//!   corriendo o no le haya llegado ningún burst todavía. Lo que sigue
+//!   pendiente (mapeo RCP, entrada 2): la máquina de estados con histéresis
+//!   (`Disabled`/`Manual`/`NoBurst`/`Wait`/`Track`/`Locked`) no existe, así
+//!   que no hay «estado del lazo» que reportar, sólo el bit binario de BITE.
 //! - `SpectrumFrame.center_freq_hz`/`span_hz` quedan a 0: el contrato
 //!   `DRx↔DSP` no expone frecuencia de muestreo ni sintonía del NCO, y la
 //!   página del algoritmo (`docs/algorithms/analizador-espectro-fi.md`) deja
@@ -120,7 +125,7 @@
 // el doc-comment de `lib.rs`. Mismo código, un solo lugar donde vive.
 use lamula_dsp_service::{config, ray};
 
-use lamula_burst::AfcLoop;
+use lamula_burst::{AfcLoop, AfcUpdate};
 use lamula_contract::drx_dsp::Afc;
 use lamula_contract::dsp_rcp::{
     command, dealias_mode, error as rcp_error, estimator, moment_kind, Capabilities, ConfigAck,
@@ -181,6 +186,11 @@ async fn main() {
     // (la ganancia depende de `prf_hz`/`n_pulses` vigentes) y se descarta en
     // `STOP`/`ENTER_SETUP`.
     let mut afc_loop: Option<AfcLoop> = None;
+    // Última actualización del lazo de AFC, para que `request_status` tenga
+    // algo que reportar (`build_status`). `None` mientras no haya lazo
+    // corriendo o todavía no le haya llegado ningún burst; se descarta junto
+    // con `afc_loop`.
+    let mut last_afc: Option<AfcUpdate> = None;
     let mut counters = Counters::default();
     let start = tokio::time::Instant::now();
     // Radial crudo más reciente (sin corrección de fase de burst), para que
@@ -229,6 +239,7 @@ async fn main() {
                                     cfg.drx_nco_fs_hz,
                                     cfg.drx_nco_word_bits,
                                 );
+                                last_afc = Some(update);
                                 let _ = ingest
                                     .afc
                                     .send(Afc {
@@ -265,6 +276,7 @@ async fn main() {
                     &mut first_ray_after_config,
                     &mut previous_prf,
                     &mut afc_loop,
+                    &mut last_afc,
                     &cfg,
                     &counters,
                     start,
@@ -302,6 +314,7 @@ async fn handle_down_message(
     first_ray_after_config: &mut bool,
     previous_prf: &mut Option<ray::PreviousPrf>,
     afc_loop: &mut Option<AfcLoop>,
+    last_afc: &mut Option<AfcUpdate>,
     svc_cfg: &ServiceConfig,
     counters: &Counters,
     start: tokio::time::Instant,
@@ -363,9 +376,10 @@ async fn handle_down_message(
                     *assembler = None;
                     *previous_prf = None;
                     *afc_loop = None;
+                    *last_afc = None;
                 }
                 command::REQUEST_STATUS => {
-                    let status = build_status(session, counters, start);
+                    let status = build_status(session, counters, start, last_afc);
                     let _ = up.send(UpMessage::Status(status)).await;
                 }
                 command::REQUEST_CAPABILITIES => {
@@ -432,7 +446,12 @@ fn capabilities() -> Capabilities {
     }
 }
 
-fn build_status(session: &Session, counters: &Counters, start: tokio::time::Instant) -> Status {
+fn build_status(
+    session: &Session,
+    counters: &Counters,
+    start: tokio::time::Instant,
+    last_afc: &Option<AfcUpdate>,
+) -> Status {
     let config = session.config();
     Status {
         uptime_s: start.elapsed().as_secs() as u32,
@@ -450,6 +469,13 @@ fn build_status(session: &Session, counters: &Counters, start: tokio::time::Inst
         // Igual que `capabilities`: techo que este binario sabe procesar,
         // no una cuenta real de canales conectados (sin fuente para eso).
         n_rx_channels: 2,
+        // 0 en los cuatro sin lazo de AFC corriendo todavía (no en `START`,
+        // o `START` sin ningún burst recibido aún) — mismo criterio de
+        // "sin dato" que el resto de campos por defecto de este mensaje.
+        afc_freq_meas_hz: last_afc.map(|u| u.freq_meas_hz as f32).unwrap_or(0.0),
+        afc_control_freq_hz: last_afc.map(|u| u.freq_hz as f32).unwrap_or(0.0),
+        afc_burst_amplitude: last_afc.map(|u| u.amplitude as f32).unwrap_or(0.0),
+        afc_bite: last_afc.map(|u| u.bite as u8).unwrap_or(0),
         // severity/last_error/capability_flags/bite_flags/queue_depth/
         // bins_ok/bins_total/trigger_period_meas_ns/dc_offset_*/
         // noise_floor_dbm_{1,2,3}: sin fuente real en este workspace, ver

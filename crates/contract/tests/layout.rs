@@ -131,7 +131,7 @@ fn drx_afc() {
 fn dsp_identidad() {
     assert_eq!(dsp_rcp::MAGIC, 0x4C4D_4453, "magic no es \"LMDS\"");
     assert_eq!(dsp_rcp::VERSION_MAJOR, 1);
-    assert_eq!(dsp_rcp::VERSION_MINOR, 3);
+    assert_eq!(dsp_rcp::VERSION_MINOR, 4);
 }
 
 /// Los dos contratos comparten forma y tamaño de cabecera a propósito, para que
@@ -210,18 +210,19 @@ fn dsp_spectrum_frame() {
 #[test]
 fn dsp_status() {
     check_layout!(
-        dsp_rcp::Status, 104,
+        dsp_rcp::Status, 113,
         uptime_s: 4, phase: 1, severity: 1, last_error: 1, n_rx_channels: 1,
         capability_flags: 4, bite_flags: 4, config_seq: 4, rays_in: 4,
         rays_out: 4, rays_dropped: 4, queue_depth: 4, bins_ok: 4,
         bins_total: 4, trigger_period_cmd_ns: 4, trigger_period_meas_ns: 4,
-        pad0: 4,
+        afc_freq_meas_hz: 4,
         noise_floor_dbm_0: 4, noise_floor_dbm_1: 4, noise_floor_dbm_2: 4,
         noise_floor_dbm_3: 4,
         dc_offset_i_0: 4, dc_offset_i_1: 4, dc_offset_i_2: 4, dc_offset_i_3: 4,
         dc_offset_q_0: 4, dc_offset_q_1: 4, dc_offset_q_2: 4, dc_offset_q_3: 4,
+        afc_control_freq_hz: 4, afc_burst_amplitude: 4, afc_bite: 1,
     );
-    assert_eq!(dsp_rcp::STATUS_SIZE, 104);
+    assert_eq!(dsp_rcp::STATUS_SIZE, 113);
 }
 
 #[test]

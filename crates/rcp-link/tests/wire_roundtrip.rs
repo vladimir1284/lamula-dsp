@@ -122,7 +122,7 @@ fn status_is_fixed_size_with_no_variable_payload() {
         bins_total: 1000,
         trigger_period_cmd_ns: 1_000_000,
         trigger_period_meas_ns: 1_000_050,
-        pad0: 0,
+        afc_freq_meas_hz: 1_234.5,
         noise_floor_dbm_0: -110.0,
         noise_floor_dbm_1: -109.5,
         noise_floor_dbm_2: -110.2,
@@ -135,6 +135,9 @@ fn status_is_fixed_size_with_no_variable_payload() {
         dc_offset_q_1: 0.0,
         dc_offset_q_2: 0.0,
         dc_offset_q_3: 0.0,
+        afc_control_freq_hz: 1_200.0,
+        afc_burst_amplitude: 4.2,
+        afc_bite: 1,
     };
 
     let frame = encode_status(&status);
@@ -145,6 +148,11 @@ fn status_is_fixed_size_with_no_variable_payload() {
     assert_eq!(payload_len, STATUS_SIZE as u32);
     let uptime = u32::from_le_bytes(frame[12..16].try_into().unwrap());
     assert_eq!(uptime, 42);
+    assert_eq!(
+        *frame.last().unwrap(),
+        1,
+        "afc_bite va al final del mensaje"
+    );
 }
 
 #[test]

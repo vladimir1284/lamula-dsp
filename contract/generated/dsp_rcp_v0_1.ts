@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.3 — lado MMI.
+// Contrato DSP↔RCP v1.4 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 3;
+export const VERSION_MINOR = 4;
 
 const LE = true;
 
@@ -424,8 +424,8 @@ export interface Status {
   triggerPeriodCmdNs: number;
   /** Periodo de disparo medido, ns. La diferencia es la deriva. */
   triggerPeriodMeasNs: number;
-  /** Relleno explícito; vale 0. */
-  pad0: number;
+  /** Frecuencia del burst medida en esta actualización del lazo de AFC (`lamula_burst::AfcUpdate::freq_meas_hz`), sin filtrar. Congelada en el último valor válido mientras `afc_bite` esté a 1. 0 sin lazo de AFC corriendo (sólo magnetrón, `burst_window_bins > 0` en `config`). Consume el relleno explícito v1.3 (`pad0`), mismo tamaño. */
+  afcFreqMeasHz: number;
   /** Suelo de ruido del canal 0, dBm. */
   noiseFloorDbm0: number;
   /** Suelo de ruido del canal 1, dBm. */
@@ -450,9 +450,15 @@ export interface Status {
   dcOffsetQ2: number;
   /** Offset de continua en Q, canal 3. */
   dcOffsetQ3: number;
+  /** Offset de frecuencia filtrado que el lazo de AFC aplica esta actualización (`lamula_burst::AfcUpdate::freq_hz`) — el valor de control realmente enviado al NCO del DRx vía el mensaje `Afc` (`nco_phase_inc`). 0 sin lazo de AFC corriendo. Nuevo en v1.4, aditivo. */
+  afcControlFreqHz: number;
+  /** Amplitud media del burst medida esta actualización (`lamula_burst::AfcUpdate::amplitude`). Unidad lineal/relativa del receptor, **no** dBm calibrado — no existe conversión a dBm para este canal en este workspace. 0 sin lazo de AFC corriendo. Nuevo en v1.4, aditivo. */
+  afcBurstAmplitude: number;
+  /** 1 si esta actualización del lazo de AFC se congeló por pérdida de burst (`lamula_burst::AfcUpdate::bite`), 0 en otro caso o sin lazo corriendo. La máquina de estados con histéresis (Disabled/Manual/NoBurst/Wait/Track/Locked) no existe todavía — sólo este bit binario. Nuevo en v1.4, aditivo. */
+  afcBite: number;
 }
 
-export const STATUS_SIZE = 104;
+export const STATUS_SIZE = 113;
 
 export const STATUS_OFFSETS = {
   uptimeS: 0,
@@ -471,7 +477,7 @@ export const STATUS_OFFSETS = {
   binsTotal: 40,
   triggerPeriodCmdNs: 44,
   triggerPeriodMeasNs: 48,
-  pad0: 52,
+  afcFreqMeasHz: 52,
   noiseFloorDbm0: 56,
   noiseFloorDbm1: 60,
   noiseFloorDbm2: 64,
@@ -484,6 +490,9 @@ export const STATUS_OFFSETS = {
   dcOffsetQ1: 92,
   dcOffsetQ2: 96,
   dcOffsetQ3: 100,
+  afcControlFreqHz: 104,
+  afcBurstAmplitude: 108,
+  afcBite: 112,
 } as const;
 
 export function decodeStatus(view: DataView, base = 0): Status {
@@ -504,7 +513,7 @@ export function decodeStatus(view: DataView, base = 0): Status {
     binsTotal: view.getUint32(base + 40, LE),
     triggerPeriodCmdNs: view.getUint32(base + 44, LE),
     triggerPeriodMeasNs: view.getUint32(base + 48, LE),
-    pad0: view.getUint32(base + 52, LE),
+    afcFreqMeasHz: view.getFloat32(base + 52, LE),
     noiseFloorDbm0: view.getFloat32(base + 56, LE),
     noiseFloorDbm1: view.getFloat32(base + 60, LE),
     noiseFloorDbm2: view.getFloat32(base + 64, LE),
@@ -517,6 +526,9 @@ export function decodeStatus(view: DataView, base = 0): Status {
     dcOffsetQ1: view.getFloat32(base + 92, LE),
     dcOffsetQ2: view.getFloat32(base + 96, LE),
     dcOffsetQ3: view.getFloat32(base + 100, LE),
+    afcControlFreqHz: view.getFloat32(base + 104, LE),
+    afcBurstAmplitude: view.getFloat32(base + 108, LE),
+    afcBite: view.getUint8(base + 112),
   };
 }
 
@@ -538,7 +550,7 @@ export function encodeStatus(value: Status, view?: DataView, base = 0): DataView
   dv.setUint32(base + 40, value.binsTotal, LE);
   dv.setUint32(base + 44, value.triggerPeriodCmdNs, LE);
   dv.setUint32(base + 48, value.triggerPeriodMeasNs, LE);
-  dv.setUint32(base + 52, value.pad0, LE);
+  dv.setFloat32(base + 52, value.afcFreqMeasHz, LE);
   dv.setFloat32(base + 56, value.noiseFloorDbm0, LE);
   dv.setFloat32(base + 60, value.noiseFloorDbm1, LE);
   dv.setFloat32(base + 64, value.noiseFloorDbm2, LE);
@@ -551,6 +563,9 @@ export function encodeStatus(value: Status, view?: DataView, base = 0): DataView
   dv.setFloat32(base + 92, value.dcOffsetQ1, LE);
   dv.setFloat32(base + 96, value.dcOffsetQ2, LE);
   dv.setFloat32(base + 100, value.dcOffsetQ3, LE);
+  dv.setFloat32(base + 104, value.afcControlFreqHz, LE);
+  dv.setFloat32(base + 108, value.afcBurstAmplitude, LE);
+  dv.setUint8(base + 112, value.afcBite);
   return dv;
 }
 

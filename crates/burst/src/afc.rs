@@ -18,27 +18,38 @@ pub fn loop_gain(update_period_s: f64, tau_s: f64) -> f64 {
 /// Resultado de una actualización del lazo de AFC.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AfcUpdate {
-    /// Estimación de frecuencia filtrada tras esta actualización, Hz.
+    /// Estimación de frecuencia filtrada tras esta actualización, Hz — el
+    /// valor de control que se aplica al NCO del DRx (ver
+    /// `nco_phase_inc_for_freq_offset`).
     pub freq_hz: f64,
+    /// Frecuencia del burst medida en esta actualización, sin filtrar, Hz.
+    /// Congelada en la última medida válida mientras `bite` esté a `true`.
+    pub freq_meas_hz: f64,
+    /// Amplitud media del burst medida en esta actualización, unidad lineal
+    /// del receptor (no calibrada a dBm). Es la medida que se compara contra
+    /// `amp_threshold`, se reporta siempre, incluso cuando dispara `bite`.
+    pub amplitude: f64,
     /// `true` si esta actualización se congeló por pérdida de burst — la
     /// amplitud medida cayó por debajo de `amp_threshold`.
     pub bite: bool,
 }
 
 /// Lazo de AFC de primer orden. Se alimenta un burst por rayo con
-/// [`AfcLoop::update`]; el estado (`freq_hz`) persiste entre llamadas.
+/// [`AfcLoop::update`]; el estado (`freq_hz`, `freq_meas_hz`) persiste entre
+/// llamadas.
 pub struct AfcLoop {
     gain: f64,
     amp_threshold: f64,
     dt_fast_s: f64,
     freq_hz: f64,
+    freq_meas_hz: f64,
 }
 
 impl AfcLoop {
     /// `gain` es la ganancia del lazo (ver [`loop_gain`]), `amp_threshold` el
     /// umbral de amplitud de burst por debajo del cual se declara pérdida, y
     /// `dt_fast_s` el periodo de muestreo dentro de la ventana de burst. El
-    /// estado arranca en `freq_hz = 0.0`.
+    /// estado arranca en `freq_hz = freq_meas_hz = 0.0`.
     pub fn new(gain: f64, amp_threshold: f64, dt_fast_s: f64) -> Self {
         assert!((0.0..=1.0).contains(&gain), "gain debe estar en [0,1]");
         Self {
@@ -46,6 +57,7 @@ impl AfcLoop {
             amp_threshold,
             dt_fast_s,
             freq_hz: 0.0,
+            freq_meas_hz: 0.0,
         }
     }
 
@@ -65,14 +77,19 @@ impl AfcLoop {
         if amp_meas < self.amp_threshold {
             return AfcUpdate {
                 freq_hz: self.freq_hz,
+                freq_meas_hz: self.freq_meas_hz,
+                amplitude: amp_meas,
                 bite: true,
             };
         }
 
         let f_meas = burst_freq_estimate(burst, self.dt_fast_s);
+        self.freq_meas_hz = f_meas;
         self.freq_hz += self.gain * (f_meas - self.freq_hz);
         AfcUpdate {
             freq_hz: self.freq_hz,
+            freq_meas_hz: self.freq_meas_hz,
+            amplitude: amp_meas,
             bite: false,
         }
     }

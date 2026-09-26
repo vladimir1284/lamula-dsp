@@ -72,7 +72,7 @@ async fn status_sent_up_arrives_on_the_wire() {
         bins_total: 100,
         trigger_period_cmd_ns: 1000,
         trigger_period_meas_ns: 1000,
-        pad0: 0,
+        afc_freq_meas_hz: 0.0,
         noise_floor_dbm_0: -110.0,
         noise_floor_dbm_1: 0.0,
         noise_floor_dbm_2: 0.0,
@@ -85,6 +85,9 @@ async fn status_sent_up_arrives_on_the_wire() {
         dc_offset_q_1: 0.0,
         dc_offset_q_2: 0.0,
         dc_offset_q_3: 0.0,
+        afc_control_freq_hz: 0.0,
+        afc_burst_amplitude: 0.0,
+        afc_bite: 0,
     };
     link.up.send(UpMessage::Status(status)).await.unwrap();
 
@@ -136,7 +139,7 @@ async fn simulated_source_flag_is_stamped_on_every_up_frame() {
         bins_total: 100,
         trigger_period_cmd_ns: 1000,
         trigger_period_meas_ns: 1000,
-        pad0: 0,
+        afc_freq_meas_hz: 0.0,
         noise_floor_dbm_0: -110.0,
         noise_floor_dbm_1: 0.0,
         noise_floor_dbm_2: 0.0,
@@ -149,6 +152,9 @@ async fn simulated_source_flag_is_stamped_on_every_up_frame() {
         dc_offset_q_1: 0.0,
         dc_offset_q_2: 0.0,
         dc_offset_q_3: 0.0,
+        afc_control_freq_hz: 0.0,
+        afc_burst_amplitude: 0.0,
+        afc_bite: 0,
     };
     link.up.send(UpMessage::Status(status)).await.unwrap();
 

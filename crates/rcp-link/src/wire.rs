@@ -224,7 +224,7 @@ pub fn encode_status(status: &Status) -> Vec<u8> {
     buf.extend_from_slice(&status.bins_total.to_le_bytes());
     buf.extend_from_slice(&status.trigger_period_cmd_ns.to_le_bytes());
     buf.extend_from_slice(&status.trigger_period_meas_ns.to_le_bytes());
-    buf.extend_from_slice(&status.pad0.to_le_bytes());
+    buf.extend_from_slice(&status.afc_freq_meas_hz.to_le_bytes());
     buf.extend_from_slice(&status.noise_floor_dbm_0.to_le_bytes());
     buf.extend_from_slice(&status.noise_floor_dbm_1.to_le_bytes());
     buf.extend_from_slice(&status.noise_floor_dbm_2.to_le_bytes());
@@ -237,6 +237,9 @@ pub fn encode_status(status: &Status) -> Vec<u8> {
     buf.extend_from_slice(&status.dc_offset_q_1.to_le_bytes());
     buf.extend_from_slice(&status.dc_offset_q_2.to_le_bytes());
     buf.extend_from_slice(&status.dc_offset_q_3.to_le_bytes());
+    buf.extend_from_slice(&status.afc_control_freq_hz.to_le_bytes());
+    buf.extend_from_slice(&status.afc_burst_amplitude.to_le_bytes());
+    buf.push(status.afc_bite);
 
     debug_assert_eq!(buf.len(), HEADER_SIZE + STATUS_SIZE);
     buf

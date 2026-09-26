@@ -569,9 +569,15 @@ hardware DRx, no bloquea el resto del cableo. `crates/service::ray` gana
 `lamula_burst::loop_gain(n_pulses/prf_hz, afc_tau_s)`, con `afc_tau_s`/
 `afc_amp_threshold` como otro par de variables de entorno obligatorias del
 mismo tipo) y lo alimenta una vez por radial, mandando el `Afc` resultante por
-`ingest.afc`. El congelamiento/BITE de `AfcUpdate::bite` ante pérdida de burst
-no se publica en ningún sitio todavía — no hay Status & BITE Manager en este
-workspace, mismo alcance que ya declaraba `crate::main` para el resto de BITE.
+`ingest.afc`. **Actualización:** cada `AfcUpdate` (frecuencia medida sin
+filtrar, offset de control filtrado, amplitud de burst, bit de
+congelamiento/BITE) se publica ahora en los cuatro campos `afc_*` de `status`
+(contrato v1.4, `crate::build_status`) — issue #1 ítem 2 del backlog de
+paridad MMI. Sigue sin existir la máquina de estados con histéresis
+(`Disabled`/`Manual`/`NoBurst`/`Wait`/`Track`/`Locked`, mapeo RCP entrada 2):
+no hay «estado del lazo» que reportar, sólo el bit binario de BITE — mismo
+alcance que ya declaraba `crate::main` para el resto de BITE (no hay Status &
+BITE Manager en este workspace).
 Tests: contraste puro de la conversión Hz→palabra en `crates/burst`
 (cuarto de vuelta, envuelto negativo, envuelto a escala completa), cableo del
 socket en `crates/ingest/tests/afc_write_path.rs` (llega tal cual antes de
