@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 4
+version_minor = 5
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -456,13 +456,25 @@ values = [
 [[enum]]
 name = "sweep_mode"
 type = "u8"
-doc = "Modos de barrido."
+doc = """Modos de barrido. Los cinco primeros (0-4) son patrón de movimiento de
+antena; los tres nuevos de v1.5 (5-7) son tipo de corte de rango/velocidad
+(`docs/algorithms/procesamiento-de-rango.md` §"Modos de barrido / tipos de
+corte"). RVP900 legacy los trata como un único "major mode"; aquí conviven en
+el mismo campo por compatibilidad con ese inventario, sin que sean mutuamente
+excluyentes en la práctica (un PPI puede correr en split-cut). Este campo es
+metadato de paso: `crates/service::ray` lo copia de `config` a cada
+`MomentRay` sin ramificar sobre él — el reparto real de PRF baja/alta ya lo
+decide `scan_mode` del contrato `DRx↔DSP` (`contract/vendor/drx_dsp_v0_1.rs`),
+y `crates/range::compose_split_cut` sólo compone los momentos ya estimados."""
 values = [
   { name = "ppi", value = 0, doc = "Azimut variable a elevación fija." },
   { name = "rhi", value = 1, doc = "Elevación variable a azimut fijo." },
   { name = "sector", value = 2, doc = "Sector de azimut acotado." },
   { name = "point", value = 3, doc = "Antena parada en una posición." },
   { name = "manual", value = 4, doc = "Movimiento gobernado por el operador." },
+  { name = "split_cut", value = 5, doc = "Dos barridos completos a la misma elevación, PRF baja y PRF alta, compuestos (`compose_split_cut`)." },
+  { name = "batch_cut", value = 6, doc = "Mismo reparto PRF baja/alta que split cut, alternando bloques de pulsos dentro de un solo barrido." },
+  { name = "doppler_cut", value = 7, doc = "Un único barrido a PRF alta; reflectividad y velocidad de la misma serie." },
 ]
 
 [[enum]]

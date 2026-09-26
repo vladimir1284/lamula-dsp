@@ -57,6 +57,13 @@ barridos distintos, y el contrato `DRx↔DSP` expone tres:
 - **Doppler cut.** Un único barrido a PRF alta; todo se estima de la misma serie.
   Es el modo simple y el que exige más del [dealiasing](dual-prf-dealiasing.md).
 
+Quién decide el reparto real de PRF baja/alta es `scan_mode` del contrato
+`DRx↔DSP` (`contract/vendor/drx_dsp_v0_1.rs`), no este documento. Desde v1.5
+`dsp_rcp::sweep_mode` (`DSP↔RCP`) también lleva estos tres valores
+(`SPLIT_CUT`/`BATCH_CUT`/`DOPPLER_CUT`, issue #1 ítem 3), para que el RCP
+pueda anunciar/pedir el tipo de corte — es metadato de paso hacia
+`MomentRay`, `crates/service::ray` no ramifica sobre él.
+
 **Ensamblado del radial.** Los ángulos llegan como cuentas crudas de encoder SSI
 —`azimuth_raw`, `elevation_raw`— y hay que convertirlos a grados con la
 resolución del encoder y su offset de cero, ambos configuración. Un radial cubre

@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.4 — lado DSP.
+// Contrato DSP↔RCP v1.5 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 4;
+pub const VERSION_MINOR: u8 = 5;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -564,7 +564,16 @@ pub mod command {
     pub const REQUEST_SPECTRUM: u8 = 7;
 }
 
-/// Modos de barrido.
+/// Modos de barrido. Los cinco primeros (0-4) son patrón de movimiento de
+/// antena; los tres nuevos de v1.5 (5-7) son tipo de corte de rango/velocidad
+/// (`docs/algorithms/procesamiento-de-rango.md` §"Modos de barrido / tipos de
+/// corte"). RVP900 legacy los trata como un único "major mode"; aquí conviven en
+/// el mismo campo por compatibilidad con ese inventario, sin que sean mutuamente
+/// excluyentes en la práctica (un PPI puede correr en split-cut). Este campo es
+/// metadato de paso: `crates/service::ray` lo copia de `config` a cada
+/// `MomentRay` sin ramificar sobre él — el reparto real de PRF baja/alta ya lo
+/// decide `scan_mode` del contrato `DRx↔DSP` (`contract/vendor/drx_dsp_v0_1.rs`),
+/// y `crates/range::compose_split_cut` sólo compone los momentos ya estimados.
 pub mod sweep_mode {
     /// Azimut variable a elevación fija.
     pub const PPI: u8 = 0;
@@ -576,6 +585,12 @@ pub mod sweep_mode {
     pub const POINT: u8 = 3;
     /// Movimiento gobernado por el operador.
     pub const MANUAL: u8 = 4;
+    /// Dos barridos completos a la misma elevación, PRF baja y PRF alta, compuestos (`compose_split_cut`).
+    pub const SPLIT_CUT: u8 = 5;
+    /// Mismo reparto PRF baja/alta que split cut, alternando bloques de pulsos dentro de un solo barrido.
+    pub const BATCH_CUT: u8 = 6;
+    /// Un único barrido a PRF alta; reflectividad y velocidad de la misma serie.
+    pub const DOPPLER_CUT: u8 = 7;
 }
 
 /// Modos de extensión del intervalo de velocidad no ambigua.

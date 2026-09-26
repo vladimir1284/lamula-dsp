@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.4 — lado MMI.
+// Contrato DSP↔RCP v1.5 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 4;
+export const VERSION_MINOR = 5;
 
 const LE = true;
 
@@ -1172,7 +1172,16 @@ export const Command = {
 } as const;
 
 /**
- * Modos de barrido.
+ * Modos de barrido. Los cinco primeros (0-4) son patrón de movimiento de
+ * antena; los tres nuevos de v1.5 (5-7) son tipo de corte de rango/velocidad
+ * (`docs/algorithms/procesamiento-de-rango.md` §"Modos de barrido / tipos de
+ * corte"). RVP900 legacy los trata como un único "major mode"; aquí conviven en
+ * el mismo campo por compatibilidad con ese inventario, sin que sean mutuamente
+ * excluyentes en la práctica (un PPI puede correr en split-cut). Este campo es
+ * metadato de paso: `crates/service::ray` lo copia de `config` a cada
+ * `MomentRay` sin ramificar sobre él — el reparto real de PRF baja/alta ya lo
+ * decide `scan_mode` del contrato `DRx↔DSP` (`contract/vendor/drx_dsp_v0_1.rs`),
+ * y `crates/range::compose_split_cut` sólo compone los momentos ya estimados.
  */
 export const SweepMode = {
   /** Azimut variable a elevación fija. */
@@ -1185,6 +1194,12 @@ export const SweepMode = {
   POINT: 3,
   /** Movimiento gobernado por el operador. */
   MANUAL: 4,
+  /** Dos barridos completos a la misma elevación, PRF baja y PRF alta, compuestos (`compose_split_cut`). */
+  SPLIT_CUT: 5,
+  /** Mismo reparto PRF baja/alta que split cut, alternando bloques de pulsos dentro de un solo barrido. */
+  BATCH_CUT: 6,
+  /** Un único barrido a PRF alta; reflectividad y velocidad de la misma serie. */
+  DOPPLER_CUT: 7,
 } as const;
 
 /**
