@@ -196,11 +196,11 @@ use lamula_attenuation::zphi_correct_dbz_accurate;
 use lamula_burst::{burst_phase_estimate, correct_phase};
 use lamula_calibration::power_to_dbz;
 use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
-use lamula_contract::drx_dsp::channel;
+use lamula_contract::drx_dsp::{self, channel};
 use lamula_contract::dsp_rcp::{
     clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind,
-    polarization_mode, range_dealias_mode, ray_flag, transmitter_type, Config, MomentField,
-    MomentRay, SpectrumFrame,
+    polarization_mode, range_dealias_mode, ray_flag, sweep_mode, transmitter_type, Config,
+    MomentField, MomentRay, SpectrumFrame,
 };
 use lamula_dual_prf::{continuity_fix, dealias_dual_prf};
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
@@ -797,6 +797,113 @@ pub fn build_spectrum_frame(
     Some(UpMessage::SpectrumFrame {
         frame,
         bins_db: bins_db.into_iter().map(|v| v as f32).collect(),
+    })
+}
+
+/// Ciclos de `fs_hz` que corresponden a `us` microsegundos, redondeado al
+/// entero más cercano y saturado a `u32`. `fs_hz` es
+/// `ServiceConfig::drx_trigger_fs_hz`, el reloj de trigger del DRx — **no
+/// confirmado que sea el mismo reloj que `ServiceConfig::drx_nco_fs_hz`**
+/// (la referencia del NCO de recepción, usada por
+/// `lamula_burst::nco_phase_inc_for_freq_offset`); son parámetros de
+/// instalación distintos hasta que alguien lo confirme contra la
+/// especificación real del DRx. Reabre, sólo para esto, la misma
+/// preocupación que motivó D-02 (ver el doc-comment de `drx_dsp::Afc`): el
+/// AFC sigue sin necesitar `fs_hz`, viaja como palabra de fase.
+pub fn trigger_us_to_cycles(us: f32, fs_hz: f64) -> u32 {
+    let cycles = (us as f64) * 1.0e-6 * fs_hz;
+    cycles.round().clamp(0.0, u32::MAX as f64) as u32
+}
+
+/// Canales físicos que hay que pedirle al DRx en `channel_mask` para poder
+/// producir lo que pide `config.moment_mask`. `RX_0` (H, ganancia nominal)
+/// siempre: ningún momento de este pipeline se calcula sin él. `RX_2` (V,
+/// ganancia nominal) sólo si se pide algún momento dual-pol (ZDR/ΦDP/KDP/
+/// LDR/ρHV) — no hay ningún campo en `Config` que declare "esta instalación
+/// tiene canal V"; `capabilities()`/`build_status()` ya declaran
+/// `n_rx_channels: 2` como techo que este binario sabe procesar, no como
+/// cuenta real de canales conectados (ver sus doc-comments), así que no es
+/// una fuente utilizable. Atarlo a lo que el propio `moment_mask` pide es
+/// la única señal real que existe hoy. `TX_BURST_0` sólo si
+/// `burst_window_bins > 0`. Nunca pide `RX_1`/`RX_3` (canales de rango
+/// dinámico extendido): `Config` no tiene ningún control para ellos.
+/// Asume la convención de `drx_dsp::channel` (RX_0/RX_2 = ganancia nominal
+/// de H/V) que su propio doc-comment marca sin confirmar contra el cableado
+/// físico (`docs/alcance/pendientes.md`, A10, en `lamula-rcp`) — mismo tipo
+/// de riesgo ya aceptado en otros sitios de este crate, no uno nuevo.
+fn drx_channel_mask(config: &Config) -> u8 {
+    const DUAL_POL_MOMENTS: u32 = (1 << moment_kind::ZDR)
+        | (1 << moment_kind::PHIDP)
+        | (1 << moment_kind::KDP)
+        | (1 << moment_kind::LDR)
+        | (1 << moment_kind::RHOHV);
+    let mut mask = channel::RX_0;
+    if config.moment_mask & DUAL_POL_MOMENTS != 0 {
+        mask |= channel::RX_2;
+    }
+    if config.burst_window_bins > 0 {
+        mask |= channel::TX_BURST_0;
+    }
+    mask
+}
+
+/// `drx_dsp::Config.scan_mode` sólo tiene tres valores válidos (0 = split
+/// cut, 1 = batch cut, 2 = doppler cut; cualquier otro es
+/// `error::SCAN_MODE_INVALID` del lado DRx) y `dsp_rcp::sweep_mode` los
+/// conflates con el patrón de movimiento de antena en el mismo campo **sin
+/// que sean mutuamente excluyentes en la práctica** — el propio doc-comment
+/// del esquema lo dice: "un PPI puede correr en split-cut". Cuando
+/// `sweep_mode` es uno de los tres tipos de corte, la traducción es directa
+/// y sin ambigüedad. Cuando NO lo es (`ppi`/`rhi`/`sector`/`point`/
+/// `manual`), este campo no tiene de dónde sacar un `scan_mode` válido —no
+/// es que falte un valor por defecto razonable, es que el dato no existe
+/// en `Config` tal como está hoy: un PPI corriendo en qué tipo de corte es
+/// información que este campo, por diseño, no puede llevar a la vez.
+/// Devuelve `None` en ese caso; `crate::main` no manda `Config` al DRx
+/// cuando pasa esto, en vez de adivinar uno de los tres valores.
+fn drx_scan_mode(cfg_sweep_mode: u8) -> Option<u8> {
+    match cfg_sweep_mode {
+        m if m == sweep_mode::SPLIT_CUT => Some(0),
+        m if m == sweep_mode::BATCH_CUT => Some(1),
+        m if m == sweep_mode::DOPPLER_CUT => Some(2),
+        _ => None,
+    }
+}
+
+/// Traduce un `Config` de `DSP↔RCP` al `Config` de `DRx↔DSP` que hay que
+/// mandarle al DRx (issue #1 ítem 5). `None` si `drx_scan_mode` no puede
+/// resolver un `scan_mode` válido — ver su doc-comment; en ese caso
+/// `crate::main` no manda nada, no inventa un valor para configurar
+/// hardware real. `range_bins`/`prf_div`/`pulse_width_idx`/`cell_mode` son
+/// relay directo. `pulse_mode` va fijo a 0: no tiene enumeración
+/// documentada en ningún lado (ni `DRx↔DSP` ni ningún doc de este
+/// repositorio), pero es el único valor que usa hoy toda instalación
+/// conocida de este workspace (todo fixture y el simulador, sin excepción)
+/// — mismo tipo de asunción sin confirmar que `drx_dsp::channel::RX_0`/
+/// `RX_1`, no una inversión nueva de riesgo. `seq` reutiliza el `seq` del
+/// `Config` de RCP: trazable en capturas de cable aunque este binario no
+/// lea todavía el `config_ack` de vuelta del DRx (mismo fire-and-forget que
+/// ya tiene el canal de `Afc`, `lamula_ingest::tcp`).
+pub fn build_drx_config(config: &Config, trigger_fs_hz: f64) -> Option<drx_dsp::Config> {
+    let scan_mode = drx_scan_mode(config.sweep_mode)?;
+    Some(drx_dsp::Config {
+        seq: config.seq,
+        prf_div: config.prf_div,
+        range_bins: config.n_gates,
+        pulse_width_idx: config.pulse_width_idx,
+        pulse_mode: 0,
+        cell_mode: config.cell_mode,
+        channel_mask: drx_channel_mask(config),
+        scan_mode,
+        pad0: 0,
+        trigger_delay_0: trigger_us_to_cycles(config.trigger_delay_0, trigger_fs_hz),
+        trigger_delay_1: trigger_us_to_cycles(config.trigger_delay_1, trigger_fs_hz),
+        trigger_delay_2: trigger_us_to_cycles(config.trigger_delay_2, trigger_fs_hz),
+        trigger_delay_3: trigger_us_to_cycles(config.trigger_delay_3, trigger_fs_hz),
+        trigger_width_0: trigger_us_to_cycles(config.trigger_width_0, trigger_fs_hz),
+        trigger_width_1: trigger_us_to_cycles(config.trigger_width_1, trigger_fs_hz),
+        trigger_width_2: trigger_us_to_cycles(config.trigger_width_2, trigger_fs_hz),
+        trigger_width_3: trigger_us_to_cycles(config.trigger_width_3, trigger_fs_hz),
     })
 }
 
@@ -1758,6 +1865,136 @@ mod tests {
             trigger_width_2: 0.0,
             trigger_width_3: 0.0,
         }
+    }
+
+    #[test]
+    fn trigger_us_to_cycles_converts_and_rounds() {
+        let fs_hz = 250.0e6; // 250 MHz, valor de prueba, no del hardware real
+        assert_eq!(trigger_us_to_cycles(4.0, fs_hz), 1000);
+        assert_eq!(trigger_us_to_cycles(1.0, fs_hz), 250);
+        assert_eq!(trigger_us_to_cycles(0.0, fs_hz), 0);
+        // 0.5 ciclos redondea al par (round-half-to-even de `f64::round` es
+        // en realidad round-half-away-from-zero); sólo importa que no trunque.
+        assert_eq!(trigger_us_to_cycles(0.002, fs_hz), 1); // 0.5 ciclos -> 1
+    }
+
+    #[test]
+    fn drx_channel_mask_is_rx0_only_without_dual_pol_or_burst() {
+        let config = Config {
+            moment_mask: (1 << moment_kind::UZ) | (1 << moment_kind::V),
+            burst_window_bins: 0,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        assert_eq!(drx_channel_mask(&config), channel::RX_0);
+    }
+
+    #[test]
+    fn drx_channel_mask_adds_rx2_for_any_dual_pol_moment() {
+        for bit in [
+            moment_kind::ZDR,
+            moment_kind::PHIDP,
+            moment_kind::KDP,
+            moment_kind::LDR,
+            moment_kind::RHOHV,
+        ] {
+            let config = Config {
+                moment_mask: 1 << bit,
+                burst_window_bins: 0,
+                ..config_with_thresholds(3.0, 0.0, -100.0)
+            };
+            assert_eq!(
+                drx_channel_mask(&config),
+                channel::RX_0 | channel::RX_2,
+                "moment_kind {bit} debería pedir RX_2"
+            );
+        }
+    }
+
+    #[test]
+    fn drx_channel_mask_adds_tx_burst_0_when_burst_window_configured() {
+        let config = Config {
+            moment_mask: 1 << moment_kind::UZ,
+            burst_window_bins: 4,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        assert_eq!(
+            drx_channel_mask(&config),
+            channel::RX_0 | channel::TX_BURST_0
+        );
+    }
+
+    #[test]
+    fn drx_scan_mode_maps_the_three_cut_types() {
+        assert_eq!(drx_scan_mode(sweep_mode::SPLIT_CUT), Some(0));
+        assert_eq!(drx_scan_mode(sweep_mode::BATCH_CUT), Some(1));
+        assert_eq!(drx_scan_mode(sweep_mode::DOPPLER_CUT), Some(2));
+    }
+
+    #[test]
+    fn drx_scan_mode_is_none_for_plain_antenna_motion_sweep_modes() {
+        for m in [
+            sweep_mode::PPI,
+            sweep_mode::RHI,
+            sweep_mode::SECTOR,
+            sweep_mode::POINT,
+            sweep_mode::MANUAL,
+        ] {
+            assert_eq!(
+                drx_scan_mode(m),
+                None,
+                "sweep_mode {m} no fija un scan_mode válido, `Config` no lleva ambos ejes a la vez"
+            );
+        }
+    }
+
+    #[test]
+    fn build_drx_config_is_none_when_sweep_mode_is_plain_antenna_motion() {
+        let config = Config {
+            sweep_mode: sweep_mode::PPI,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        assert_eq!(build_drx_config(&config, 250.0e6), None);
+    }
+
+    #[test]
+    fn build_drx_config_translates_a_cut_type_sweep_mode() {
+        let config = Config {
+            seq: 9,
+            n_gates: 500,
+            sweep_mode: sweep_mode::DOPPLER_CUT,
+            pulse_width_idx: 3,
+            cell_mode: 1,
+            prf_div: 40,
+            trigger_delay_0: 4.0,
+            trigger_width_0: 1.0,
+            burst_window_bins: 2,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        let drx_config = build_drx_config(&config, 250.0e6).expect("doppler_cut es resoluble");
+        let (seq, range_bins, prf_div, pulse_width_idx, cell_mode) = (
+            drx_config.seq,
+            drx_config.range_bins,
+            drx_config.prf_div,
+            drx_config.pulse_width_idx,
+            drx_config.cell_mode,
+        );
+        let (channel_mask, scan_mode, pulse_mode, delay_0, width_0) = (
+            drx_config.channel_mask,
+            drx_config.scan_mode,
+            drx_config.pulse_mode,
+            drx_config.trigger_delay_0,
+            drx_config.trigger_width_0,
+        );
+        assert_eq!(seq, 9);
+        assert_eq!(range_bins, 500);
+        assert_eq!(prf_div, 40);
+        assert_eq!(pulse_width_idx, 3);
+        assert_eq!(cell_mode, 1);
+        assert_eq!(channel_mask, channel::RX_0 | channel::TX_BURST_0);
+        assert_eq!(scan_mode, 2);
+        assert_eq!(pulse_mode, 0);
+        assert_eq!(delay_0, 1000);
+        assert_eq!(width_0, 250);
     }
 
     fn estimate(

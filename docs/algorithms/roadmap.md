@@ -659,6 +659,39 @@ de `crate::main` para el detalle completo y lo que hace falta decidir antes
 de cerrar esto. `cargo build`/`clippy -D warnings`/`fmt --check`/`test
 --workspace` limpios, contrato v1.7.
 
+**Actualización, misma sesión: se construyó el camino de escritura y se
+cerraron dos de las tres asunciones con datos reales, no adivinados; la
+tercera (`scan_mode`) resultó ser un límite real del campo, no una decisión
+pendiente.** `IngestSource` gana `drx_config` (mismo patrón que `afc`:
+`crates/ingest/src/{tcp,udp,simulator}.rs`, `encode_config_frame`); `crate::
+main` lo cablea en `DownMessage::Config`, fire-and-forget, sólo cuando la
+config es válida para este binario. `crate::ray::build_drx_config` hace la
+traducción: `pulse_mode` fijo a 0 (sin enumeración documentada, pero único
+valor que usa todo fixture/simulador del repo — riesgo ya aceptado, no uno
+nuevo); `channel_mask` derivado de `moment_mask` (RX_2 sólo si se pide algún
+momento dual-pol) y `burst_window_bins` (TX_BURST_0), en vez de un conteo de
+canales que no existe en ningún sitio (`capabilities()`/`build_status()` ya
+declaran `n_rx_channels: 2` como techo, no como cuenta real — ver sus
+doc-comments); `trigger_delay_N`/`trigger_width_N` se convierten de
+microsegundos a ciclos con `ServiceConfig::drx_trigger_fs_hz` (parámetro de
+instalación nuevo, mismo tipo de hueco sin confirmar que `drx_nco_fs_hz`,
+reabre D-02 sólo para esto). Para `scan_mode` no había un tercer camino
+razonable de adivinar: el propio esquema de `sweep_mode` dice que el tipo de
+corte y el patrón de movimiento de antena "no son mutuamente excluyentes en
+la práctica (un PPI puede correr en split-cut)" pero viajan en el mismo
+campo — así que para `ppi`/`rhi`/`sector`/`point`/`manual` el dato
+simplemente no está en `Config` hoy, no es que falte un default. Se
+resolvió con la responsabilidad de validación que el propio mapeo le da al
+DSP: `build_drx_config` devuelve `None` para esos cinco valores y este
+binario no manda `Config` al DRx en ese caso (sí procesa la config
+localmente, sin cambio ahí) en vez de mandar uno de los tres valores sin
+respaldo. Test end-to-end nuevo (`service::tests::end_to_end`, ahora con
+`sweep_mode::SPLIT_CUT`) que lee el `Config` real que le llega al DRx falso
+y compara byte a byte los campos relayados y convertidos; más unitarios de
+`build_drx_config`/`drx_channel_mask`/`drx_scan_mode`/`trigger_us_to_cycles`
+en `crate::ray`. `cargo build`/`clippy -D warnings`/`fmt --check`/`test
+--workspace` limpios (contrato sigue en v1.7, esto no lo tocó).
+
 **Analizador de espectro de FI (`crates/spectrum-analyzer`) →
 `crates/service::ray` — cerrado el hueco de contrato, cableada la captura
 oportunista.** `crates/spectrum-analyzer` (periodograma de Welch, ganancia

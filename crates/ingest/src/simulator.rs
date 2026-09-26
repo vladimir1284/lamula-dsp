@@ -26,10 +26,12 @@ use crate::IngestSource;
 /// de la lista nunca llegaba a ver las tramas válidas que la seguían.
 pub fn spawn(frames: Vec<Vec<u8>>, full_scale_counts: i16, capacity: usize) -> IngestSource {
     let (tx, rx) = mpsc::channel::<RawPulseFrame>(capacity);
-    // Sin transporte real detrás: nadie drena este canal, así que un `send`
-    // sobre `IngestSource::afc` falla de inmediato en vez de bloquear (ver su
-    // doc-comment). Es intencional — este adapter no tiene DRx del otro lado.
+    // Sin transporte real detrás: nadie drena estos canales, así que un
+    // `send` sobre `IngestSource::afc`/`drx_config` falla de inmediato en vez
+    // de bloquear (ver su doc-comment). Es intencional — este adapter no
+    // tiene DRx del otro lado.
     let (afc_tx, _afc_rx) = mpsc::channel(1);
+    let (drx_config_tx, _drx_config_rx) = mpsc::channel(1);
     let malformed_frames = Arc::new(AtomicU64::new(0));
     let task: JoinHandle<Result<(), IngestError>> = {
         let malformed_frames = Arc::clone(&malformed_frames);
@@ -52,6 +54,7 @@ pub fn spawn(frames: Vec<Vec<u8>>, full_scale_counts: i16, capacity: usize) -> I
     IngestSource {
         frames: rx,
         afc: afc_tx,
+        drx_config: drx_config_tx,
         task,
         malformed_frames,
     }

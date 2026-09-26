@@ -12,6 +12,7 @@ use std::net::TcpListener as StdTcpListener;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use lamula_contract::drx_dsp;
 use lamula_contract::dsp_rcp::{self, Config, Control, MsgType, HEADER_SIZE, MAGIC};
 use lamula_simulator::{generate_cell, pack_rays, CellParams, RayHeaderFields};
 use rand::rngs::StdRng;
@@ -117,6 +118,40 @@ async fn read_config_ack(stream: &mut TcpStream) -> (u32, u8) {
     (seq, payload[4])
 }
 
+/// Lee un `drx_dsp::Config` (issue #1 ítem 5) del socket falso del DRx y lo
+/// devuelve ya decodificado — mismo layout que
+/// `crates/ingest/src/wire.rs::encode_config_frame`, del otro lado.
+async fn read_drx_config(stream: &mut TcpStream) -> drx_dsp::Config {
+    let mut header = [0u8; drx_dsp::HEADER_SIZE];
+    stream.read_exact(&mut header).await.unwrap();
+    assert_eq!(&header[0..4], &drx_dsp::MAGIC.to_le_bytes());
+    assert_eq!(header[4], drx_dsp::VERSION_MAJOR);
+    assert_eq!(header[6], drx_dsp::MsgType::Config as u8);
+    let payload_len = u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
+    assert_eq!(payload_len, drx_dsp::CONFIG_SIZE);
+    let mut body = vec![0u8; payload_len];
+    stream.read_exact(&mut body).await.unwrap();
+    drx_dsp::Config {
+        seq: u32::from_le_bytes(body[0..4].try_into().unwrap()),
+        prf_div: u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        range_bins: u16::from_le_bytes(body[8..10].try_into().unwrap()),
+        pulse_width_idx: body[10],
+        pulse_mode: body[11],
+        cell_mode: body[12],
+        channel_mask: body[13],
+        scan_mode: body[14],
+        pad0: body[15],
+        trigger_delay_0: u32::from_le_bytes(body[16..20].try_into().unwrap()),
+        trigger_delay_1: u32::from_le_bytes(body[20..24].try_into().unwrap()),
+        trigger_delay_2: u32::from_le_bytes(body[24..28].try_into().unwrap()),
+        trigger_delay_3: u32::from_le_bytes(body[28..32].try_into().unwrap()),
+        trigger_width_0: u32::from_le_bytes(body[32..36].try_into().unwrap()),
+        trigger_width_1: u32::from_le_bytes(body[36..40].try_into().unwrap()),
+        trigger_width_2: u32::from_le_bytes(body[40..44].try_into().unwrap()),
+        trigger_width_3: u32::from_le_bytes(body[44..48].try_into().unwrap()),
+    }
+}
+
 async fn connect_with_retries(port: u16) -> TcpStream {
     for _ in 0..150 {
         if let Ok(s) = TcpStream::connect(("127.0.0.1", port)).await {
@@ -141,6 +176,7 @@ async fn service_binary_wires_drx_to_rcp() {
             .env("LAMULA_DSP_SSI_ZERO_OFFSET_DEG", "0.0")
             .env("LAMULA_DSP_DRX_NCO_FS_HZ", "250000000.0")
             .env("LAMULA_DSP_DRX_NCO_WORD_BITS", "32")
+            .env("LAMULA_DSP_DRX_TRIGGER_FS_HZ", "250000000.0")
             .env("LAMULA_DSP_AFC_TAU_S", "2.0")
             .env("LAMULA_DSP_AFC_AMP_THRESHOLD", "0.01")
             // Este test alimenta el binario con un DRx de mentira, así que
@@ -163,7 +199,7 @@ async fn service_binary_wires_drx_to_rcp() {
         n_gates: 3,
         clutter_filter: dsp_rcp::clutter_filter::NONE,
         dealias_mode: dsp_rcp::dealias_mode::NONE,
-        sweep_mode: dsp_rcp::sweep_mode::PPI,
+        sweep_mode: dsp_rcp::sweep_mode::SPLIT_CUT,
         estimator: dsp_rcp::estimator::PULSE_PAIR,
         rfi_filter: 0,
         range_dealias_mode: 0,
@@ -187,20 +223,63 @@ async fn service_binary_wires_drx_to_rcp() {
         polarization_mode: 0,
         transmitter_type: 0,
         burst_window_bins: 0,
-        pulse_width_idx: 0,
-        cell_mode: 0,
-        prf_div: 0,
-        trigger_delay_0: 0.0,
+        pulse_width_idx: 2,
+        cell_mode: 1,
+        prf_div: 40,
+        trigger_delay_0: 4.0,
         trigger_delay_1: 0.0,
         trigger_delay_2: 0.0,
         trigger_delay_3: 0.0,
-        trigger_width_0: 0.0,
+        trigger_width_0: 1.0,
         trigger_width_1: 0.0,
         trigger_width_2: 0.0,
         trigger_width_3: 0.0,
     };
     rcp.write_all(&build_config_frame(&config)).await.unwrap();
     assert_eq!(read_config_ack(&mut rcp).await, (1, dsp_rcp::error::OK));
+
+    // Config válido y `sweep_mode` de tipo corte (`SPLIT_CUT`): el binario
+    // debe retransmitir un `drx_dsp::Config` al DRx (issue #1 ítem 5,
+    // `crate::ray::build_drx_config`). LAMULA_DSP_DRX_TRIGGER_FS_HZ=250 MHz
+    // (arriba): 4.0 µs -> 1000 ciclos, 1.0 µs -> 250 ciclos.
+    let drx_config = read_drx_config(&mut drx).await;
+    // Copias locales: `drx_dsp::Config` es `packed`, tomar referencia a un
+    // campo directamente (lo que hace `assert_eq!` por dentro) es UB.
+    let (seq, range_bins, prf_div, pulse_width_idx, pulse_mode, cell_mode) = (
+        drx_config.seq,
+        drx_config.range_bins,
+        drx_config.prf_div,
+        drx_config.pulse_width_idx,
+        drx_config.pulse_mode,
+        drx_config.cell_mode,
+    );
+    let (channel_mask, scan_mode, trigger_delay_0, trigger_width_0) = (
+        drx_config.channel_mask,
+        drx_config.scan_mode,
+        drx_config.trigger_delay_0,
+        drx_config.trigger_width_0,
+    );
+    let (want_seq, want_n_gates, want_prf_div, want_pulse_width_idx, want_cell_mode) = (
+        config.seq,
+        config.n_gates,
+        config.prf_div,
+        config.pulse_width_idx,
+        config.cell_mode,
+    );
+    assert_eq!(seq, want_seq);
+    assert_eq!(range_bins, want_n_gates);
+    assert_eq!(prf_div, want_prf_div);
+    assert_eq!(pulse_width_idx, want_pulse_width_idx);
+    assert_eq!(pulse_mode, 0);
+    assert_eq!(cell_mode, want_cell_mode);
+    assert_eq!(
+        channel_mask,
+        lamula_contract::drx_dsp::channel::RX_0,
+        "sólo UZ+V pedidos, sin dual-pol ni burst: nada más que RX_0"
+    );
+    assert_eq!(scan_mode, 0, "SPLIT_CUT -> scan_mode 0");
+    assert_eq!(trigger_delay_0, 1000);
+    assert_eq!(trigger_width_0, 250);
 
     let start = Control {
         seq: 2,

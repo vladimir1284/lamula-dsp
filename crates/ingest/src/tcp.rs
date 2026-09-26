@@ -54,7 +54,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use lamula_contract::drx_dsp::{Afc, HEADER_SIZE, RAY_SIZE};
+use lamula_contract::drx_dsp::{Afc, Config, HEADER_SIZE, RAY_SIZE};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
 use tokio::net::{TcpListener, ToSocketAddrs};
@@ -62,7 +62,7 @@ use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
 use crate::error::IngestError;
-use crate::wire::{decode_ray_frame, encode_afc_frame};
+use crate::wire::{decode_ray_frame, encode_afc_frame, encode_config_frame};
 use crate::IngestSource;
 
 /// Escucha en `addr`. Separado de [`spawn`] para que quien llama pueda leer
@@ -79,17 +79,38 @@ pub async fn bind(addr: impl ToSocketAddrs) -> Result<TcpListener, IngestError> 
 pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> IngestSource {
     let (tx, rx) = mpsc::channel(capacity);
     let (afc_tx, mut afc_rx) = mpsc::channel::<Afc>(capacity);
+    let (drx_config_tx, mut drx_config_rx) = mpsc::channel::<Config>(capacity);
     let write_half: Arc<Mutex<Option<OwnedWriteHalf>>> = Arc::new(Mutex::new(None));
     let malformed_frames = Arc::new(AtomicU64::new(0));
 
-    // Tarea de escritura: vive tanto como `afc_tx` tenga algún emisor vivo
-    // (este `spawn`, y quien clone `IngestSource::afc`), independiente del
-    // ciclo accept/reconectar de la tarea de lectura de abajo.
+    // Tarea de escritura: vive tanto como `afc_tx`/`drx_config_tx` tengan
+    // algún emisor vivo (este `spawn`, y quien clone
+    // `IngestSource::afc`/`IngestSource::drx_config`), independiente del
+    // ciclo accept/reconectar de la tarea de lectura de abajo. Un `select!`
+    // entre los dos canales basta: comparten la misma mitad de escritura y
+    // nunca hace falta ordenarlos entre sí (no hay ninguna relación de
+    // dependencia entre una corrección de AFC y un `Config` nuevo).
     {
         let write_half = Arc::clone(&write_half);
         tokio::spawn(async move {
-            while let Some(afc) = afc_rx.recv().await {
-                let frame = encode_afc_frame(&afc);
+            // Los `if afc_open`/`if cfg_open` deshabilitan la rama entera
+            // cuando su canal ya cerró — sin esto, un `mpsc::Receiver`
+            // cerrado devuelve `None` de inmediato en cada `poll` y el
+            // `select!` giraría en caliente sobre esa rama en vez de
+            // bloquearse en la otra.
+            let mut afc_open = true;
+            let mut cfg_open = true;
+            while afc_open || cfg_open {
+                let frame = tokio::select! {
+                    afc = afc_rx.recv(), if afc_open => match afc {
+                        Some(afc) => encode_afc_frame(&afc),
+                        None => { afc_open = false; continue; }
+                    },
+                    cfg = drx_config_rx.recv(), if cfg_open => match cfg {
+                        Some(cfg) => encode_config_frame(&cfg),
+                        None => { cfg_open = false; continue; }
+                    },
+                };
                 let mut guard = write_half.lock().await;
                 if let Some(w) = guard.as_mut() {
                     if w.write_all(&frame).await.is_err() {
@@ -159,6 +180,7 @@ pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> 
     IngestSource {
         frames: rx,
         afc: afc_tx,
+        drx_config: drx_config_tx,
         task,
         malformed_frames,
     }

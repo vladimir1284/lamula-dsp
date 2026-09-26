@@ -40,13 +40,15 @@ mod wire;
 pub use angle::ssi_counts_to_deg;
 pub use assembly::{AssembledRadial, RadialAssembler};
 pub use error::IngestError;
-pub use wire::{decode_ray_frame, encode_afc_frame, RawPulseFrame};
+pub use wire::{decode_ray_frame, encode_afc_frame, encode_config_frame, RawPulseFrame};
 
 /// Un adapter en marcha: tramas decodificadas en orden por `frames`, más el
 /// `task` en el que corre (para propagar errores o hacer `abort`/`await`), más
-/// `afc` para mandar correcciones `Afc` de vuelta al DRx (sólo tiene efecto
-/// sobre el adapter [`tcp`]; [`simulator`] y [`udp`] la aceptan y la
-/// descartan — ver el doc-comment de [`tcp::spawn`]).
+/// `afc` para mandar correcciones `Afc` de vuelta al DRx y `drx_config` para
+/// mandarle un `Config` (issue #1 ítem 5, `crate::ray::build_drx_config` en
+/// `lamula-dsp-service`) — las dos sólo tienen efecto sobre el adapter
+/// [`tcp`]; [`simulator`] y [`udp`] las aceptan y las descartan, mismo
+/// criterio que ya tenía `afc` (ver el doc-comment de [`tcp::spawn`]).
 ///
 /// `malformed_frames`: cuenta tramas que `decode_ray_frame` rechazó
 /// (`BadMagic`/`UnsupportedVersion`/`UnexpectedMsgType`/`Truncated`) y que
@@ -58,6 +60,7 @@ pub use wire::{decode_ray_frame, encode_afc_frame, RawPulseFrame};
 pub struct IngestSource {
     pub frames: tokio::sync::mpsc::Receiver<RawPulseFrame>,
     pub afc: tokio::sync::mpsc::Sender<lamula_contract::drx_dsp::Afc>,
+    pub drx_config: tokio::sync::mpsc::Sender<lamula_contract::drx_dsp::Config>,
     pub task: tokio::task::JoinHandle<Result<(), IngestError>>,
     pub malformed_frames: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }

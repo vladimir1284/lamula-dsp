@@ -6,7 +6,8 @@
 //! canal-más-rápido-que-bin del payload).
 
 use lamula_contract::drx_dsp::{
-    Afc, MsgType, AFC_SIZE, HEADER_SIZE, MAGIC, RAY_SIZE, VERSION_MAJOR, VERSION_MINOR,
+    Afc, Config, MsgType, AFC_SIZE, CONFIG_SIZE, HEADER_SIZE, MAGIC, RAY_SIZE, VERSION_MAJOR,
+    VERSION_MINOR,
 };
 use rustfft::num_complex::Complex64;
 
@@ -33,6 +34,91 @@ pub fn encode_afc_frame(afc: &Afc) -> Vec<u8> {
     buf.extend_from_slice(&afc.pad0.to_le_bytes());
     debug_assert_eq!(buf.len(), HEADER_SIZE + AFC_SIZE);
     buf
+}
+
+/// Serializa un mensaje `Config` (`DRx↔DSP`, sentido `down`, issue #1 ítem 5)
+/// como cabecera de 12 B seguida de sus 48 B, sin carga variable. Orden de
+/// campos igual que `contract/vendor/drx_dsp_v0_1.rs::Config` — ver
+/// `crate::ray::build_drx_config` en `lamula-dsp-service` para cómo se
+/// construye este valor a partir de `dsp_rcp::Config`.
+pub fn encode_config_frame(cfg: &Config) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(HEADER_SIZE + CONFIG_SIZE);
+    buf.extend_from_slice(&MAGIC.to_le_bytes());
+    buf.push(VERSION_MAJOR);
+    buf.push(VERSION_MINOR);
+    buf.push(MsgType::Config as u8);
+    buf.push(0); // flags, reservado
+    buf.extend_from_slice(&(CONFIG_SIZE as u32).to_le_bytes());
+
+    buf.extend_from_slice(&cfg.seq.to_le_bytes());
+    buf.extend_from_slice(&cfg.prf_div.to_le_bytes());
+    buf.extend_from_slice(&cfg.range_bins.to_le_bytes());
+    buf.push(cfg.pulse_width_idx);
+    buf.push(cfg.pulse_mode);
+    buf.push(cfg.cell_mode);
+    buf.push(cfg.channel_mask);
+    buf.push(cfg.scan_mode);
+    buf.push(cfg.pad0);
+    buf.extend_from_slice(&cfg.trigger_delay_0.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_1.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_2.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_3.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_0.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_1.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_2.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_3.to_le_bytes());
+    debug_assert_eq!(buf.len(), HEADER_SIZE + CONFIG_SIZE);
+    buf
+}
+
+#[cfg(test)]
+mod config_encode_tests {
+    use super::*;
+    use lamula_contract::drx_dsp::channel;
+
+    #[test]
+    fn encode_config_frame_matches_header_and_payload_layout() {
+        let cfg = Config {
+            seq: 7,
+            prf_div: 40,
+            range_bins: 1000,
+            pulse_width_idx: 2,
+            pulse_mode: 0,
+            cell_mode: 1,
+            channel_mask: channel::RX_0 | channel::RX_2,
+            scan_mode: 1,
+            pad0: 0,
+            trigger_delay_0: 100,
+            trigger_delay_1: 200,
+            trigger_delay_2: 300,
+            trigger_delay_3: 400,
+            trigger_width_0: 10,
+            trigger_width_1: 20,
+            trigger_width_2: 30,
+            trigger_width_3: 40,
+        };
+        let frame = encode_config_frame(&cfg);
+        assert_eq!(frame.len(), HEADER_SIZE + CONFIG_SIZE);
+        assert_eq!(&frame[0..4], &MAGIC.to_le_bytes());
+        assert_eq!(frame[6], MsgType::Config as u8);
+        assert_eq!(
+            u32::from_le_bytes(frame[8..12].try_into().unwrap()),
+            CONFIG_SIZE as u32
+        );
+        assert_eq!(u32::from_le_bytes(frame[12..16].try_into().unwrap()), 7);
+        assert_eq!(u32::from_le_bytes(frame[16..20].try_into().unwrap()), 40);
+        assert_eq!(u16::from_le_bytes(frame[20..22].try_into().unwrap()), 1000);
+        assert_eq!(frame[22], 2);
+        assert_eq!(frame[23], 0);
+        assert_eq!(frame[24], 1);
+        assert_eq!(frame[25], channel::RX_0 | channel::RX_2);
+        assert_eq!(frame[26], 1);
+        assert_eq!(frame[27], 0);
+        assert_eq!(u32::from_le_bytes(frame[28..32].try_into().unwrap()), 100);
+        assert_eq!(u32::from_le_bytes(frame[40..44].try_into().unwrap()), 400);
+        assert_eq!(u32::from_le_bytes(frame[44..48].try_into().unwrap()), 10);
+        assert_eq!(u32::from_le_bytes(frame[56..60].try_into().unwrap()), 40);
+    }
 }
 
 #[cfg(test)]

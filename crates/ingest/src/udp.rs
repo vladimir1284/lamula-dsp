@@ -35,10 +35,11 @@ pub async fn bind(addr: impl ToSocketAddrs) -> Result<UdpSocket, IngestError> {
 /// hay sincronía de bytes que preservar entre uno y el siguiente.
 pub fn spawn(socket: UdpSocket, full_scale_counts: i16, capacity: usize) -> IngestSource {
     let (tx, rx) = mpsc::channel(capacity);
-    // `IngestSource::afc` no tiene destino en un datagrama sin conexión de
-    // vuelta confirmada (v0.1, sin filtro de origen): se acepta y se
-    // descarta, igual que el adapter `simulator`.
+    // `IngestSource::afc`/`drx_config` no tienen destino en un datagrama sin
+    // conexión de vuelta confirmada (v0.1, sin filtro de origen): se aceptan
+    // y se descartan, igual que el adapter `simulator`.
     let (afc_tx, _afc_rx) = mpsc::channel(1);
+    let (drx_config_tx, _drx_config_rx) = mpsc::channel(1);
     let malformed_frames = Arc::new(AtomicU64::new(0));
     let task: JoinHandle<Result<(), IngestError>> = {
         let malformed_frames = Arc::clone(&malformed_frames);
@@ -66,6 +67,7 @@ pub fn spawn(socket: UdpSocket, full_scale_counts: i16, capacity: usize) -> Inge
     IngestSource {
         frames: rx,
         afc: afc_tx,
+        drx_config: drx_config_tx,
         task,
         malformed_frames,
     }

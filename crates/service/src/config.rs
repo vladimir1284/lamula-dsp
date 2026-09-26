@@ -16,6 +16,15 @@
 //! del propio lazo (constante de tiempo del filtro de primer orden, umbral
 //! de amplitud de burst bajo el cual se congela y se marca BITE — ver
 //! `lamula_burst::AfcLoop`), tampoco documentados en ningún contrato.
+//!
+//! `drx_trigger_fs_hz` es el mismo tipo de hueco otra vez, para un tercer
+//! reloj: `crate::ray::trigger_us_to_cycles` (issue #1 ítem 5) lo necesita
+//! para convertir `trigger_delay_N`/`trigger_width_N` de microsegundos
+//! (`DSP↔RCP` v1.7) a ciclos (`DRx↔DSP::Config`). **No confirmado que sea
+//! el mismo reloj que `drx_nco_fs_hz`** (la referencia del NCO de
+//! recepción) — son parámetros de instalación distintos hasta que alguien
+//! lo confirme contra la especificación real del DRx; ver el doc-comment
+//! de `trigger_us_to_cycles`.
 
 use std::env;
 use std::fmt;
@@ -28,6 +37,7 @@ pub struct ServiceConfig {
     pub ssi_zero_offset_deg: f64,
     pub drx_nco_fs_hz: f64,
     pub drx_nco_word_bits: u32,
+    pub drx_trigger_fs_hz: f64,
     pub afc_tau_s: f64,
     pub afc_amp_threshold: f64,
     /// Si la fuente de datos de este despliegue es un simulador y no el DRx
@@ -57,6 +67,7 @@ impl ServiceConfig {
             ssi_zero_offset_deg: parse_required("LAMULA_DSP_SSI_ZERO_OFFSET_DEG")?,
             drx_nco_fs_hz: parse_required("LAMULA_DSP_DRX_NCO_FS_HZ")?,
             drx_nco_word_bits: parse_required("LAMULA_DSP_DRX_NCO_WORD_BITS")?,
+            drx_trigger_fs_hz: parse_required("LAMULA_DSP_DRX_TRIGGER_FS_HZ")?,
             afc_tau_s: parse_required("LAMULA_DSP_AFC_TAU_S")?,
             afc_amp_threshold: parse_required("LAMULA_DSP_AFC_AMP_THRESHOLD")?,
             simulated_source: parse_bool_required("LAMULA_DSP_SIMULATED_SOURCE")?,
