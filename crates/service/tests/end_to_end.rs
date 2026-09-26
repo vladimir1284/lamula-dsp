@@ -83,6 +83,17 @@ fn build_config_frame(cfg: &Config) -> Vec<u8> {
     buf.push(cfg.polarization_mode);
     buf.push(cfg.transmitter_type);
     buf.extend_from_slice(&cfg.burst_window_bins.to_le_bytes());
+    buf.push(cfg.pulse_width_idx);
+    buf.push(cfg.cell_mode);
+    buf.extend_from_slice(&cfg.prf_div.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_0.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_1.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_2.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_3.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_0.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_1.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_2.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_3.to_le_bytes());
     buf
 }
 
@@ -176,6 +187,17 @@ async fn service_binary_wires_drx_to_rcp() {
         polarization_mode: 0,
         transmitter_type: 0,
         burst_window_bins: 0,
+        pulse_width_idx: 0,
+        cell_mode: 0,
+        prf_div: 0,
+        trigger_delay_0: 0.0,
+        trigger_delay_1: 0.0,
+        trigger_delay_2: 0.0,
+        trigger_delay_3: 0.0,
+        trigger_width_0: 0.0,
+        trigger_width_1: 0.0,
+        trigger_width_2: 0.0,
+        trigger_width_3: 0.0,
     };
     rcp.write_all(&build_config_frame(&config)).await.unwrap();
     assert_eq!(read_config_ack(&mut rcp).await, (1, dsp_rcp::error::OK));

@@ -222,6 +222,17 @@ fn build_config_frame(cfg: &Config) -> Vec<u8> {
     buf.push(cfg.polarization_mode);
     buf.push(cfg.transmitter_type);
     buf.extend_from_slice(&cfg.burst_window_bins.to_le_bytes());
+    buf.push(cfg.pulse_width_idx);
+    buf.push(cfg.cell_mode);
+    buf.extend_from_slice(&cfg.prf_div.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_0.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_1.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_2.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_delay_3.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_0.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_1.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_2.to_le_bytes());
+    buf.extend_from_slice(&cfg.trigger_width_3.to_le_bytes());
     assert_eq!(buf.len(), HEADER_SIZE + CONFIG_SIZE);
     buf
 }
@@ -259,6 +270,17 @@ fn decode_config_is_inverse_of_hand_built_frame() {
         polarization_mode: 0,
         transmitter_type: dsp_rcp::transmitter_type::KLYSTRON,
         burst_window_bins: 0,
+        pulse_width_idx: 2,
+        cell_mode: 1,
+        prf_div: 40,
+        trigger_delay_0: 1.5,
+        trigger_delay_1: 2.5,
+        trigger_delay_2: 3.5,
+        trigger_delay_3: 4.5,
+        trigger_width_0: 0.5,
+        trigger_width_1: 0.6,
+        trigger_width_2: 0.7,
+        trigger_width_3: 0.8,
     };
     let frame = build_config_frame(&cfg);
 

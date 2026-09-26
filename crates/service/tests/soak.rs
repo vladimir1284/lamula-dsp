@@ -119,6 +119,17 @@ fn pipeline_survives_thousands_of_varied_radials_without_panicking_or_publishing
             polarization_mode: 0,
             transmitter_type: 0,
             burst_window_bins: 0,
+            pulse_width_idx: 0,
+            cell_mode: 0,
+            prf_div: 0,
+            trigger_delay_0: 0.0,
+            trigger_delay_1: 0.0,
+            trigger_delay_2: 0.0,
+            trigger_delay_3: 0.0,
+            trigger_width_0: 0.0,
+            trigger_width_1: 0.0,
+            trigger_width_2: 0.0,
+            trigger_width_3: 0.0,
         };
 
         let (msg, next_previous_prf) = build_moment_ray(

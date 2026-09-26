@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.6 — lado DSP.
+// Contrato DSP↔RCP v1.7 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 6;
+pub const VERSION_MINOR: u8 = 7;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -410,8 +410,30 @@ pub struct Config {
     pub transmitter_type: u8,
     /// Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst).
     pub burst_window_bins: u16,
+    /// Índice en la tabla de anchos de pulso del DRx (drx_dsp::Config.pulse_width_idx). Relay directo: el DSP no conoce los límites de la tabla, sólo el DRx. Escribible (E5/E6, decisión mapeo-parametros-dsp.md#15). Pendiente de cablear hacia drx_dsp::Config — ver doc-comment de crate::main en el binario del servicio.
+    pub pulse_width_idx: u8,
+    /// 0 = celda fina, 1 = celda gruesa (drx_dsp::Config.cell_mode). Relay directo. Mismo pendiente de cableado que pulse_width_idx.
+    pub cell_mode: u8,
+    /// Divisor de PRF del DRx; PRF = FS_HZ/prf_div (drx_dsp::Config.prf_div). Entero puro, sin conversión de unidades — a diferencia de trigger_delay_N/trigger_width_N, no depende de FS_HZ del DRx. Mismo pendiente de cableado que pulse_width_idx.
+    pub prf_div: u32,
+    /// Retardo del trigger 0, microsegundos. drx_dsp::Config.trigger_delay_0 lo expresa en ciclos de fs del DRx; la conversión ciclos↔µs vive en el DSP (nuevo parámetro de instalación, no en ningún contrato — ver ServiceConfig::drx_trigger_fs_hz), no en el RCP, para no exponerle el reloj del DRx. Reabre en parte D-02 (ver doc-comment de drx_dsp::Afc) sólo para temporizado de trigger, no para el lazo de AFC, que sigue viajando como palabra de fase. Reabierto por decisión explícita (plan-pendientes-drx-dsp.md): F1 del MMI legacy pide esta unidad. Mismo pendiente de cableado que pulse_width_idx.
+    pub trigger_delay_0: f32,
+    /// Retardo del trigger 1, microsegundos. Ver trigger_delay_0.
+    pub trigger_delay_1: f32,
+    /// Retardo del trigger 2, microsegundos. Ver trigger_delay_0.
+    pub trigger_delay_2: f32,
+    /// Retardo del trigger 3, microsegundos. Ver trigger_delay_0.
+    pub trigger_delay_3: f32,
+    /// Ancho del trigger 0, microsegundos. Misma conversión y mismo pendiente que trigger_delay_0.
+    pub trigger_width_0: f32,
+    /// Ancho del trigger 1, microsegundos. Ver trigger_width_0.
+    pub trigger_width_1: f32,
+    /// Ancho del trigger 2, microsegundos. Ver trigger_width_0.
+    pub trigger_width_2: f32,
+    /// Ancho del trigger 3, microsegundos. Ver trigger_width_0.
+    pub trigger_width_3: f32,
 }
-pub const CONFIG_SIZE: usize = 84;
+pub const CONFIG_SIZE: usize = 122;
 
 /// Mandato del plano de control. Se responde siempre con un config_ack.
 #[repr(C, packed)]

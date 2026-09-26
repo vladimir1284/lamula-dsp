@@ -635,6 +635,30 @@ la posición o qué otros canales traiga el radial. Test de regresión
 publica ZDR aunque se pida). `cargo build`/`cargo test --workspace`
 limpios, `cargo fmt` aplicado.
 
+**Relay de parámetros del DRx en `DSP↔RCP` (issue #1 ítem 5) — sólo la mitad
+segura, la otra mitad queda bloqueada y documentada, no adivinada.**
+`drx_dsp::Config` (vendorizado, v0.4) ya trae `pulse_width_idx`, `cell_mode`,
+`prf_div` y los cuatro pares `trigger_delay_N`/`trigger_width_N`, todos
+escribibles del lado DRx — el hueco parecía ser sólo de representación en
+`DSP↔RCP`. Se añadieron esos siete campos a `config` (contrato v1.6→v1.7,
+`trigger_delay_N`/`trigger_width_N` en microsegundos por decisión explícita
+de esta sesión — reabre `plan-pendientes-drx-dsp.md`, que había dejado esos
+cuatro pares de solo lectura). Pero al ir a cablearlos de verdad hacia el
+DRx apareció un hueco más grande que el que describe el plan cross-repo:
+**este binario nunca ha tenido ningún camino de escritura de `Config` hacia
+el DRx** (sólo existe uno para `Afc`, `lamula_ingest::tcp`), y `drx_dsp::Config`
+se aplica atómico — hay que mandarlo completo o no mandarlo. Completarlo
+exige inventar tres cosas que ningún documento resuelve: el valor de
+`pulse_mode` (sin enumeración documentada en ningún lado), la derivación de
+`channel_mask` a partir de lo que pide el RCP, y qué `scan_mode` mandar
+cuando `sweep_mode` no es `split_cut`/`batch_cut`/`doppler_cut` (`scan_mode`
+del DRx sólo tiene esos tres valores). Se decidió no fabricar esos tres
+valores para poder configurar hardware real — los campos nuevos quedan
+aceptados y guardados en `Config`, pero sin retransmitir; ver el doc-comment
+de `crate::main` para el detalle completo y lo que hace falta decidir antes
+de cerrar esto. `cargo build`/`clippy -D warnings`/`fmt --check`/`test
+--workspace` limpios, contrato v1.7.
+
 **Analizador de espectro de FI (`crates/spectrum-analyzer`) →
 `crates/service::ray` — cerrado el hueco de contrato, cableada la captura
 oportunista.** `crates/spectrum-analyzer` (periodograma de Welch, ganancia

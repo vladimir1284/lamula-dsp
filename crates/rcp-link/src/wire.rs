@@ -411,6 +411,17 @@ fn decode_config_body(body: &[u8]) -> Result<Config, RcpLinkError> {
         polarization_mode: body[80],
         transmitter_type: body[81],
         burst_window_bins: u16::from_le_bytes(body[82..84].try_into().unwrap()),
+        pulse_width_idx: body[84],
+        cell_mode: body[85],
+        prf_div: u32::from_le_bytes(body[86..90].try_into().unwrap()),
+        trigger_delay_0: f32::from_le_bytes(body[90..94].try_into().unwrap()),
+        trigger_delay_1: f32::from_le_bytes(body[94..98].try_into().unwrap()),
+        trigger_delay_2: f32::from_le_bytes(body[98..102].try_into().unwrap()),
+        trigger_delay_3: f32::from_le_bytes(body[102..106].try_into().unwrap()),
+        trigger_width_0: f32::from_le_bytes(body[106..110].try_into().unwrap()),
+        trigger_width_1: f32::from_le_bytes(body[110..114].try_into().unwrap()),
+        trigger_width_2: f32::from_le_bytes(body[114..118].try_into().unwrap()),
+        trigger_width_3: f32::from_le_bytes(body[118..122].try_into().unwrap()),
     })
 }
 

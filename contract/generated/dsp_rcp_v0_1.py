@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v1.6 — lado RCP y
+Contrato DSP↔RCP v1.7 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 1
-VERSION_MINOR = 6
+VERSION_MINOR = 7
 
 @dataclass
 class Header:
@@ -287,9 +287,9 @@ class Capabilities:
 class Config:
     """Configuración completa. Se aplica de forma atómica: o entra entera o se"""
 
-    FORMAT = "<IIHHBBBBBBBBfffffffffffffffBBH"
-    SIZE = 84
-    FIELDS = ("seq", "moment_mask", "n_pulses", "n_gates", "clutter_filter", "dealias_mode", "sweep_mode", "estimator", "rfi_filter", "range_dealias_mode", "prf_ratio_num", "prf_ratio_den", "start_range_m", "gate_spacing_m", "prf_hz", "sqi_threshold", "sig_threshold", "ccor_threshold", "log_threshold", "clutter_width_ms", "radar_constant_db", "noise_floor_dbm", "receiver_gain_db", "zdr_offset_db", "phidp_offset_deg", "antenna_isolation_db", "wavelength_m", "polarization_mode", "transmitter_type", "burst_window_bins",)
+    FORMAT = "<IIHHBBBBBBBBfffffffffffffffBBHBBIffffffff"
+    SIZE = 122
+    FIELDS = ("seq", "moment_mask", "n_pulses", "n_gates", "clutter_filter", "dealias_mode", "sweep_mode", "estimator", "rfi_filter", "range_dealias_mode", "prf_ratio_num", "prf_ratio_den", "start_range_m", "gate_spacing_m", "prf_hz", "sqi_threshold", "sig_threshold", "ccor_threshold", "log_threshold", "clutter_width_ms", "radar_constant_db", "noise_floor_dbm", "receiver_gain_db", "zdr_offset_db", "phidp_offset_deg", "antenna_isolation_db", "wavelength_m", "polarization_mode", "transmitter_type", "burst_window_bins", "pulse_width_idx", "cell_mode", "prf_div", "trigger_delay_0", "trigger_delay_1", "trigger_delay_2", "trigger_delay_3", "trigger_width_0", "trigger_width_1", "trigger_width_2", "trigger_width_3",)
 
     seq: int = 0
     moment_mask: int = 0
@@ -321,6 +321,17 @@ class Config:
     polarization_mode: int = 0
     transmitter_type: int = 0
     burst_window_bins: int = 0
+    pulse_width_idx: int = 0
+    cell_mode: int = 0
+    prf_div: int = 0
+    trigger_delay_0: float = 0.0
+    trigger_delay_1: float = 0.0
+    trigger_delay_2: float = 0.0
+    trigger_delay_3: float = 0.0
+    trigger_width_0: float = 0.0
+    trigger_width_1: float = 0.0
+    trigger_width_2: float = 0.0
+    trigger_width_3: float = 0.0
 
     def pack(self) -> bytes:
         return struct.pack(self.FORMAT, *(getattr(self, name) for name in self.FIELDS))

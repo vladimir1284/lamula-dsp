@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 6
+version_minor = 7
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -330,6 +330,17 @@ fields = [
   { name = "polarization_mode", type = "u8", doc = "Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único." },
   { name = "transmitter_type", type = "u8", doc = "Tipo de transmisor de esta instalación. Ver la enumeración `transmitter_type`. Reemplaza la constante local `MAGNETRON_TRANSMITTER` de `crates/service::ray` — el parque es mixto, magnetrón y klistrón conviven, así que no se puede fijar en tiempo de compilación. De este campo depende qué vía de recuperación de segundo trip aplica (fase aleatoria frente a SZ(8/64)), si la corrección de fase por burst es obligatoria u opcional, y qué controles puede ofrecer el MMI sin invitar a un error de instalación. Consume el relleno explícito v1.5 (`pad0`), mismo tamaño." },
   { name = "burst_window_bins", type = "u16", doc = "Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst)." },
+  { name = "pulse_width_idx", type = "u8", doc = "Índice en la tabla de anchos de pulso del DRx (drx_dsp::Config.pulse_width_idx). Relay directo: el DSP no conoce los límites de la tabla, sólo el DRx. Escribible (E5/E6, decisión mapeo-parametros-dsp.md#15). Pendiente de cablear hacia drx_dsp::Config — ver doc-comment de crate::main en el binario del servicio." },
+  { name = "cell_mode", type = "u8", doc = "0 = celda fina, 1 = celda gruesa (drx_dsp::Config.cell_mode). Relay directo. Mismo pendiente de cableado que pulse_width_idx." },
+  { name = "prf_div", type = "u32", doc = "Divisor de PRF del DRx; PRF = FS_HZ/prf_div (drx_dsp::Config.prf_div). Entero puro, sin conversión de unidades — a diferencia de trigger_delay_N/trigger_width_N, no depende de FS_HZ del DRx. Mismo pendiente de cableado que pulse_width_idx." },
+  { name = "trigger_delay_0", type = "f32", doc = "Retardo del trigger 0, microsegundos. drx_dsp::Config.trigger_delay_0 lo expresa en ciclos de fs del DRx; la conversión ciclos↔µs vive en el DSP (nuevo parámetro de instalación, no en ningún contrato — ver ServiceConfig::drx_trigger_fs_hz), no en el RCP, para no exponerle el reloj del DRx. Reabre en parte D-02 (ver doc-comment de drx_dsp::Afc) sólo para temporizado de trigger, no para el lazo de AFC, que sigue viajando como palabra de fase. Reabierto por decisión explícita (plan-pendientes-drx-dsp.md): F1 del MMI legacy pide esta unidad. Mismo pendiente de cableado que pulse_width_idx." },
+  { name = "trigger_delay_1", type = "f32", doc = "Retardo del trigger 1, microsegundos. Ver trigger_delay_0." },
+  { name = "trigger_delay_2", type = "f32", doc = "Retardo del trigger 2, microsegundos. Ver trigger_delay_0." },
+  { name = "trigger_delay_3", type = "f32", doc = "Retardo del trigger 3, microsegundos. Ver trigger_delay_0." },
+  { name = "trigger_width_0", type = "f32", doc = "Ancho del trigger 0, microsegundos. Misma conversión y mismo pendiente que trigger_delay_0." },
+  { name = "trigger_width_1", type = "f32", doc = "Ancho del trigger 1, microsegundos. Ver trigger_width_0." },
+  { name = "trigger_width_2", type = "f32", doc = "Ancho del trigger 2, microsegundos. Ver trigger_width_0." },
+  { name = "trigger_width_3", type = "f32", doc = "Ancho del trigger 3, microsegundos. Ver trigger_width_0." },
 ]
 
 [[message]]

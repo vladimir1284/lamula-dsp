@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.6 — lado MMI.
+// Contrato DSP↔RCP v1.7 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 6;
+export const VERSION_MINOR = 7;
 
 const LE = true;
 
@@ -855,9 +855,31 @@ export interface Config {
   transmitterType: number;
   /** Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst). */
   burstWindowBins: number;
+  /** Índice en la tabla de anchos de pulso del DRx (drx_dsp::Config.pulse_width_idx). Relay directo: el DSP no conoce los límites de la tabla, sólo el DRx. Escribible (E5/E6, decisión mapeo-parametros-dsp.md#15). Pendiente de cablear hacia drx_dsp::Config — ver doc-comment de crate::main en el binario del servicio. */
+  pulseWidthIdx: number;
+  /** 0 = celda fina, 1 = celda gruesa (drx_dsp::Config.cell_mode). Relay directo. Mismo pendiente de cableado que pulse_width_idx. */
+  cellMode: number;
+  /** Divisor de PRF del DRx; PRF = FS_HZ/prf_div (drx_dsp::Config.prf_div). Entero puro, sin conversión de unidades — a diferencia de trigger_delay_N/trigger_width_N, no depende de FS_HZ del DRx. Mismo pendiente de cableado que pulse_width_idx. */
+  prfDiv: number;
+  /** Retardo del trigger 0, microsegundos. drx_dsp::Config.trigger_delay_0 lo expresa en ciclos de fs del DRx; la conversión ciclos↔µs vive en el DSP (nuevo parámetro de instalación, no en ningún contrato — ver ServiceConfig::drx_trigger_fs_hz), no en el RCP, para no exponerle el reloj del DRx. Reabre en parte D-02 (ver doc-comment de drx_dsp::Afc) sólo para temporizado de trigger, no para el lazo de AFC, que sigue viajando como palabra de fase. Reabierto por decisión explícita (plan-pendientes-drx-dsp.md): F1 del MMI legacy pide esta unidad. Mismo pendiente de cableado que pulse_width_idx. */
+  triggerDelay0: number;
+  /** Retardo del trigger 1, microsegundos. Ver trigger_delay_0. */
+  triggerDelay1: number;
+  /** Retardo del trigger 2, microsegundos. Ver trigger_delay_0. */
+  triggerDelay2: number;
+  /** Retardo del trigger 3, microsegundos. Ver trigger_delay_0. */
+  triggerDelay3: number;
+  /** Ancho del trigger 0, microsegundos. Misma conversión y mismo pendiente que trigger_delay_0. */
+  triggerWidth0: number;
+  /** Ancho del trigger 1, microsegundos. Ver trigger_width_0. */
+  triggerWidth1: number;
+  /** Ancho del trigger 2, microsegundos. Ver trigger_width_0. */
+  triggerWidth2: number;
+  /** Ancho del trigger 3, microsegundos. Ver trigger_width_0. */
+  triggerWidth3: number;
 }
 
-export const CONFIG_SIZE = 84;
+export const CONFIG_SIZE = 122;
 
 export const CONFIG_OFFSETS = {
   seq: 0,
@@ -890,6 +912,17 @@ export const CONFIG_OFFSETS = {
   polarizationMode: 80,
   transmitterType: 81,
   burstWindowBins: 82,
+  pulseWidthIdx: 84,
+  cellMode: 85,
+  prfDiv: 86,
+  triggerDelay0: 90,
+  triggerDelay1: 94,
+  triggerDelay2: 98,
+  triggerDelay3: 102,
+  triggerWidth0: 106,
+  triggerWidth1: 110,
+  triggerWidth2: 114,
+  triggerWidth3: 118,
 } as const;
 
 export function decodeConfig(view: DataView, base = 0): Config {
@@ -924,6 +957,17 @@ export function decodeConfig(view: DataView, base = 0): Config {
     polarizationMode: view.getUint8(base + 80),
     transmitterType: view.getUint8(base + 81),
     burstWindowBins: view.getUint16(base + 82, LE),
+    pulseWidthIdx: view.getUint8(base + 84),
+    cellMode: view.getUint8(base + 85),
+    prfDiv: view.getUint32(base + 86, LE),
+    triggerDelay0: view.getFloat32(base + 90, LE),
+    triggerDelay1: view.getFloat32(base + 94, LE),
+    triggerDelay2: view.getFloat32(base + 98, LE),
+    triggerDelay3: view.getFloat32(base + 102, LE),
+    triggerWidth0: view.getFloat32(base + 106, LE),
+    triggerWidth1: view.getFloat32(base + 110, LE),
+    triggerWidth2: view.getFloat32(base + 114, LE),
+    triggerWidth3: view.getFloat32(base + 118, LE),
   };
 }
 
@@ -959,6 +1003,17 @@ export function encodeConfig(value: Config, view?: DataView, base = 0): DataView
   dv.setUint8(base + 80, value.polarizationMode);
   dv.setUint8(base + 81, value.transmitterType);
   dv.setUint16(base + 82, value.burstWindowBins, LE);
+  dv.setUint8(base + 84, value.pulseWidthIdx);
+  dv.setUint8(base + 85, value.cellMode);
+  dv.setUint32(base + 86, value.prfDiv, LE);
+  dv.setFloat32(base + 90, value.triggerDelay0, LE);
+  dv.setFloat32(base + 94, value.triggerDelay1, LE);
+  dv.setFloat32(base + 98, value.triggerDelay2, LE);
+  dv.setFloat32(base + 102, value.triggerDelay3, LE);
+  dv.setFloat32(base + 106, value.triggerWidth0, LE);
+  dv.setFloat32(base + 110, value.triggerWidth1, LE);
+  dv.setFloat32(base + 114, value.triggerWidth2, LE);
+  dv.setFloat32(base + 118, value.triggerWidth3, LE);
   return dv;
 }
 

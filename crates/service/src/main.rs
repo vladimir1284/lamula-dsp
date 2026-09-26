@@ -119,6 +119,35 @@
 //! - Resolución y offset de cero del encoder SSI no están documentados en
 //!   ningún sitio del repo (ver `lamula_ingest::angle`): se piden por
 //!   variable de entorno, sin valor por defecto inventado.
+//! - `Config.pulse_width_idx`/`cell_mode`/`prf_div`/`trigger_delay_0..3`/
+//!   `trigger_width_0..3` (contrato v1.7, mapeo RCP entrada 15) se aceptan y
+//!   se guardan, pero este binario **no los retransmite todavía hacia el
+//!   DRx** — hueco real, no descuido: `drx_dsp::Config` es atómico ("o entra
+//!   entera o se rechaza entera"), y este proceso no tiene hoy ningún camino
+//!   de escritura de `Config` hacia el DRx (sólo existe uno para `Afc`, ver
+//!   `lamula_ingest::tcp`). Construirlo exige fijar tres cosas que ningún
+//!   documento de este repo ni de `lamula-drx` resuelve todavía: (1) qué
+//!   valor de `drx_dsp::Config.pulse_mode` mandar — el campo no tiene
+//!   enumeración documentada en ningún lado; (2) cómo derivar
+//!   `drx_dsp::Config.channel_mask` de lo que pide el RCP (`polarization_mode`,
+//!   `burst_window_bins`) sin asumir un mapeo que nadie confirmó; (3) qué
+//!   `drx_dsp::Config.scan_mode` mandar cuando `dsp_rcp::Config.sweep_mode`
+//!   no es uno de los tres valores de corte (`split_cut`/`batch_cut`/
+//!   `doppler_cut`, ver `crate::ray`) — `scan_mode` del DRx sólo tiene esos
+//!   tres valores, sin uno por defecto. Mandar un `Config` con estos tres
+//!   campos adivinados sería configurar hardware real con datos inventados;
+//!   se prefiere dejarlo sin cablear y documentado a fabricar el valor.
+//!   `trigger_delay_0..3`/`trigger_width_0..3` viajan en microsegundos en
+//!   `DSP↔RCP` a propósito (decisión de producto, `plan-pendientes-drx-dsp.md`):
+//!   la conversión a ciclos de `FS_HZ` del DRx queda para cuando se cablee lo
+//!   de arriba, y entonces sí hace falta un nuevo parámetro de instalación
+//!   (frecuencia del reloj de trigger del DRx) — no confundir con
+//!   `ServiceConfig::drx_nco_fs_hz`, que es la referencia del NCO de
+//!   recepción, un reloj distinto y sin confirmar que sea el mismo. Ese
+//!   futuro parámetro reabre, sólo para temporizado de trigger, la misma
+//!   preocupación que motivó D-02 (que el DSP no dependa de `FS_HZ` del DRx,
+//!   ver el doc-comment de `drx_dsp::Afc`) — el AFC sigue sin tocar ese
+//!   reloj, viaja como palabra de fase, igual que siempre.
 
 // `ray`/`config` viven en `src/lib.rs` (no como `mod` propio de este
 // binario) para que `benches/moment_ray.rs` pueda enlazarlos también — ver

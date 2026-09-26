@@ -131,7 +131,7 @@ fn drx_afc() {
 fn dsp_identidad() {
     assert_eq!(dsp_rcp::MAGIC, 0x4C4D_4453, "magic no es \"LMDS\"");
     assert_eq!(dsp_rcp::VERSION_MAJOR, 1);
-    assert_eq!(dsp_rcp::VERSION_MINOR, 6);
+    assert_eq!(dsp_rcp::VERSION_MINOR, 7);
 }
 
 /// Los dos contratos comparten forma y tamaño de cabecera a propósito, para que
@@ -267,7 +267,7 @@ fn dsp_capabilities() {
 #[test]
 fn dsp_config() {
     check_layout!(
-        dsp_rcp::Config, 84,
+        dsp_rcp::Config, 122,
         seq: 4, moment_mask: 4, n_pulses: 2, n_gates: 2, clutter_filter: 1,
         dealias_mode: 1, sweep_mode: 1, estimator: 1, rfi_filter: 1,
         range_dealias_mode: 1, prf_ratio_num: 1, prf_ratio_den: 1,
@@ -276,9 +276,12 @@ fn dsp_config() {
         clutter_width_ms: 4, radar_constant_db: 4, noise_floor_dbm: 4,
         receiver_gain_db: 4, zdr_offset_db: 4, phidp_offset_deg: 4,
         antenna_isolation_db: 4, wavelength_m: 4, polarization_mode: 1,
-        transmitter_type: 1, burst_window_bins: 2,
+        transmitter_type: 1, burst_window_bins: 2, pulse_width_idx: 1,
+        cell_mode: 1, prf_div: 4, trigger_delay_0: 4, trigger_delay_1: 4,
+        trigger_delay_2: 4, trigger_delay_3: 4, trigger_width_0: 4,
+        trigger_width_1: 4, trigger_width_2: 4, trigger_width_3: 4,
     );
-    assert_eq!(dsp_rcp::CONFIG_SIZE, 84);
+    assert_eq!(dsp_rcp::CONFIG_SIZE, 122);
 }
 
 #[test]
