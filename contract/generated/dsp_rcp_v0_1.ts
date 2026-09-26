@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.7 — lado MMI.
+// Contrato DSP↔RCP v1.8 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 7;
+export const VERSION_MINOR = 8;
 
 const LE = true;
 
@@ -745,11 +745,17 @@ export interface Capabilities {
   maxPulses: number;
   /** Canales de recepción que procesa. */
   nRxChannels: number;
-  /** Relleno explícito; vale 0. */
-  pad0: number;
+  /** Anchura del acumulador de fase del NCO de recepción del DRx, bits (`lamula_burst::nco_phase_inc_for_freq_offset`). Constante de instalación, no medida; publicada para que el RCP pueda verificarla contra la especificación del DRx en vez de confiar a ciegas en la variable de entorno del DSP que la fija. Consume el relleno explícito v1.7 (`pad0`), mismo tamaño. */
+  rxNcoWordBits: number;
+  /** Frecuencia intermedia de transmisión, Hz. Constante de instalación, no medida — mapeo RCP entrada 3. */
+  txIfHz: number;
+  /** Frecuencia intermedia de recepción, Hz. Constante de instalación, no medida. Es `spectrum_frame.center_freq_hz` (`crate::ray::build_spectrum_frame`): antes salía en 0 por falta de este dato. */
+  rxIfHz: number;
+  /** Frecuencia de referencia del NCO de recepción del DRx, Hz (`ServiceConfig::drx_nco_fs_hz`). Publicada por el mismo motivo que `rx_nco_word_bits`: hoy es variable de entorno sin forma de verificarla contra el DRx real. */
+  rxNcoFsHz: number;
 }
 
-export const CAPABILITIES_SIZE = 20;
+export const CAPABILITIES_SIZE = 32;
 
 export const CAPABILITIES_OFFSETS = {
   momentMask: 0,
@@ -758,7 +764,10 @@ export const CAPABILITIES_OFFSETS = {
   maxGates: 12,
   maxPulses: 16,
   nRxChannels: 18,
-  pad0: 19,
+  rxNcoWordBits: 19,
+  txIfHz: 20,
+  rxIfHz: 24,
+  rxNcoFsHz: 28,
 } as const;
 
 export function decodeCapabilities(view: DataView, base = 0): Capabilities {
@@ -769,7 +778,10 @@ export function decodeCapabilities(view: DataView, base = 0): Capabilities {
     maxGates: view.getUint32(base + 12, LE),
     maxPulses: view.getUint16(base + 16, LE),
     nRxChannels: view.getUint8(base + 18),
-    pad0: view.getUint8(base + 19),
+    rxNcoWordBits: view.getUint8(base + 19),
+    txIfHz: view.getFloat32(base + 20, LE),
+    rxIfHz: view.getFloat32(base + 24, LE),
+    rxNcoFsHz: view.getFloat32(base + 28, LE),
   };
 }
 
@@ -781,7 +793,10 @@ export function encodeCapabilities(value: Capabilities, view?: DataView, base = 
   dv.setUint32(base + 12, value.maxGates, LE);
   dv.setUint16(base + 16, value.maxPulses, LE);
   dv.setUint8(base + 18, value.nRxChannels);
-  dv.setUint8(base + 19, value.pad0);
+  dv.setUint8(base + 19, value.rxNcoWordBits);
+  dv.setFloat32(base + 20, value.txIfHz, LE);
+  dv.setFloat32(base + 24, value.rxIfHz, LE);
+  dv.setFloat32(base + 28, value.rxNcoFsHz, LE);
   return dv;
 }
 

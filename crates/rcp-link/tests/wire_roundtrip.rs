@@ -391,7 +391,10 @@ fn config_ack_and_selftest_result_and_capabilities_are_fixed_size() {
         max_gates: 2000,
         max_pulses: 128,
         n_rx_channels: 2,
-        pad0: 0,
+        rx_nco_word_bits: 24,
+        tx_if_hz: 60.0e6,
+        rx_if_hz: 60.0e6,
+        rx_nco_fs_hz: 250.0e6,
     };
     assert_eq!(
         encode_capabilities(&caps).len(),

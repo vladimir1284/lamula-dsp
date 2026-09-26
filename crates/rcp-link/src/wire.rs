@@ -322,7 +322,10 @@ pub fn encode_capabilities(caps: &Capabilities) -> Vec<u8> {
     buf.extend_from_slice(&caps.max_gates.to_le_bytes());
     buf.extend_from_slice(&caps.max_pulses.to_le_bytes());
     buf.push(caps.n_rx_channels);
-    buf.push(caps.pad0);
+    buf.push(caps.rx_nco_word_bits);
+    buf.extend_from_slice(&caps.tx_if_hz.to_le_bytes());
+    buf.extend_from_slice(&caps.rx_if_hz.to_le_bytes());
+    buf.extend_from_slice(&caps.rx_nco_fs_hz.to_le_bytes());
 
     debug_assert_eq!(buf.len(), HEADER_SIZE + CAPABILITIES_SIZE);
     buf

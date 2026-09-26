@@ -131,7 +131,7 @@ fn drx_afc() {
 fn dsp_identidad() {
     assert_eq!(dsp_rcp::MAGIC, 0x4C4D_4453, "magic no es \"LMDS\"");
     assert_eq!(dsp_rcp::VERSION_MAJOR, 1);
-    assert_eq!(dsp_rcp::VERSION_MINOR, 7);
+    assert_eq!(dsp_rcp::VERSION_MINOR, 8);
 }
 
 /// Los dos contratos comparten forma y tamaño de cabecera a propósito, para que
@@ -257,11 +257,12 @@ fn dsp_selftest() {
 #[test]
 fn dsp_capabilities() {
     check_layout!(
-        dsp_rcp::Capabilities, 20,
+        dsp_rcp::Capabilities, 32,
         moment_mask: 4, dealias_mask: 4, estimator_mask: 4, max_gates: 4,
-        max_pulses: 2, n_rx_channels: 1, pad0: 1,
+        max_pulses: 2, n_rx_channels: 1, rx_nco_word_bits: 1, tx_if_hz: 4,
+        rx_if_hz: 4, rx_nco_fs_hz: 4,
     );
-    assert_eq!(dsp_rcp::CAPABILITIES_SIZE, 20);
+    assert_eq!(dsp_rcp::CAPABILITIES_SIZE, 32);
 }
 
 #[test]

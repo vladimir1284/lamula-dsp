@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 7
+version_minor = 8
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -284,7 +284,10 @@ fields = [
   { name = "max_gates", type = "u32", doc = "Celdas de rango máximas por radial." },
   { name = "max_pulses", type = "u16", doc = "Pulsos máximos integrables por radial." },
   { name = "n_rx_channels", type = "u8", doc = "Canales de recepción que procesa." },
-  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+  { name = "rx_nco_word_bits", type = "u8", doc = "Anchura del acumulador de fase del NCO de recepción del DRx, bits (`lamula_burst::nco_phase_inc_for_freq_offset`). Constante de instalación, no medida; publicada para que el RCP pueda verificarla contra la especificación del DRx en vez de confiar a ciegas en la variable de entorno del DSP que la fija. Consume el relleno explícito v1.7 (`pad0`), mismo tamaño." },
+  { name = "tx_if_hz", type = "f32", doc = "Frecuencia intermedia de transmisión, Hz. Constante de instalación, no medida — mapeo RCP entrada 3." },
+  { name = "rx_if_hz", type = "f32", doc = "Frecuencia intermedia de recepción, Hz. Constante de instalación, no medida. Es `spectrum_frame.center_freq_hz` (`crate::ray::build_spectrum_frame`): antes salía en 0 por falta de este dato." },
+  { name = "rx_nco_fs_hz", type = "f32", doc = "Frecuencia de referencia del NCO de recepción del DRx, Hz (`ServiceConfig::drx_nco_fs_hz`). Publicada por el mismo motivo que `rx_nco_word_bits`: hoy es variable de entorno sin forma de verificarla contra el DRx real." },
 ]
 
 [[message]]

@@ -756,18 +756,26 @@ fn sz864_decode_trip1(radial: &AssembledRadial, config: &Config) -> Option<Assem
 /// celdas o pulsos con que formar ni una sola captura — sin ráfaga en curso
 /// no hay traza que mandar (`crate::session`, mandato `request_spectrum`).
 ///
-/// `center_freq_hz`/`span_hz` quedan a 0: el contrato `DRx↔DSP` no expone
-/// frecuencia de muestreo ni la sintonía del NCO, y la página del algoritmo
-/// deja esa conversión fuera de alcance de `crates/spectrum-analyzer` por
-/// ser "mapeo de configuración, no un algoritmo" — este repositorio no
-/// tiene de dónde tomarla todavía. `ref_level_dbm` usa
-/// `config.receiver_gain_db`, la única ganancia de receptor que conoce este
-/// contrato; la calibración fina adicional que menciona la página no está
-/// modelada aparte.
+/// `span_hz` (issue #1 ítem 6, mapeo RCP entrada 3) es la anchura de Nyquist
+/// de la FFT que arma esta captura: las muestras de una captura están
+/// espaciadas en tiempo rápido por [`fast_time_dt_s`] (`config.gate_spacing_m`),
+/// así que `span_hz = 1/fast_time_dt_s` sin ningún dato nuevo del DRx — el
+/// mismo reloj implícito que ya usa el resto del pipeline para el tamaño de
+/// celda, no el `FS_HZ` que evita D-02. `center_freq_hz` sí necesitaba un
+/// dato que no existía en ningún sitio: la sintonía del NCO de recepción del
+/// DRx (la página del algoritmo lo dice explícitamente). Se toma
+/// `rx_if_hz` tal cual — la IF de recepción nominal de la instalación
+/// (`ServiceConfig::rx_if_hz`), no la sintonía instantánea que el lazo de
+/// AFC pueda estar aplicando ahora mismo (`crate::ray::afc_burst_sample`);
+/// mostrar el offset de AFC en vivo queda fuera de este ítem. `ref_level_dbm`
+/// usa `config.receiver_gain_db`, la única ganancia de receptor que conoce
+/// este contrato; la calibración fina adicional que menciona la página no
+/// está modelada aparte.
 pub fn build_spectrum_frame(
     radial: &AssembledRadial,
     config: &Config,
     seq: u32,
+    rx_if_hz: f64,
 ) -> Option<UpMessage> {
     let idx = radial.channel_index(channel::RX_0)?;
     let ch = &radial.channels[idx];
@@ -782,6 +790,7 @@ pub fn build_spectrum_frame(
         .collect();
     let win = welch_hann_window(n_bins);
     let bins_db = welch_trace_dbm(&captures, &win, config.receiver_gain_db as f64);
+    let span_hz = 1.0 / fast_time_dt_s(config);
 
     let frame = SpectrumFrame {
         seq,
@@ -789,8 +798,8 @@ pub fn build_spectrum_frame(
         n_bins: n_bins as u16,
         channel: channel::RX_0,
         flags: 0,
-        center_freq_hz: 0.0,
-        span_hz: 0.0,
+        center_freq_hz: rx_if_hz as f32,
+        span_hz: span_hz as f32,
         ref_level_dbm: config.receiver_gain_db,
         pad0: 0,
     };
@@ -2128,14 +2137,30 @@ mod tests {
             ..config_with_thresholds(3.0, 0.4, -10.0)
         };
 
-        let msg = build_spectrum_frame(&radial, &config, 7).expect("RX_0 con datos");
+        let rx_if_hz = 60.0e6;
+        let msg = build_spectrum_frame(&radial, &config, 7, rx_if_hz).expect("RX_0 con datos");
         let UpMessage::SpectrumFrame { frame, bins_db } = msg else {
             panic!("se esperaba SpectrumFrame");
         };
-        let (seq, n_bins, chan) = (frame.seq, frame.n_bins, frame.channel);
+        let (seq, n_bins, chan, center_freq_hz, span_hz) = (
+            frame.seq,
+            frame.n_bins,
+            frame.channel,
+            frame.center_freq_hz,
+            frame.span_hz,
+        );
         assert_eq!(seq, 7);
         assert_eq!(n_bins as usize, m);
         assert_eq!(chan, channel::RX_0);
+        assert_eq!(
+            center_freq_hz, rx_if_hz as f32,
+            "rx_if_hz tal cual, sin AFC"
+        );
+        let expected_span_hz = (1.0 / fast_time_dt_s(&config)) as f32;
+        assert!(
+            (span_hz - expected_span_hz).abs() < 1.0,
+            "span_hz={span_hz}, esperado {expected_span_hz}"
+        );
 
         let (peak_bin, &peak_val) = bins_db
             .iter()
@@ -2159,7 +2184,7 @@ mod tests {
         let mut radial = radial_from_channels(vec![vec![vec![Complex64::new(1.0, 0.0)]]]);
         radial.channel_mask = channel::TX_BURST_0;
         let config = config_with_thresholds(3.0, 0.4, -10.0);
-        assert!(build_spectrum_frame(&radial, &config, 1).is_none());
+        assert!(build_spectrum_frame(&radial, &config, 1, 60.0e6).is_none());
     }
 
     const ALL_MOMENTS_MASK: u32 = (1 << moment_kind::UZ)

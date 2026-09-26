@@ -25,6 +25,17 @@
 //! recepción) — son parámetros de instalación distintos hasta que alguien
 //! lo confirme contra la especificación real del DRx; ver el doc-comment
 //! de `trigger_us_to_cycles`.
+//!
+//! `tx_if_hz`/`rx_if_hz` (issue #1 ítem 6, mapeo RCP entrada 3) son las
+//! frecuencias intermedias de transmisión/recepción de esta instalación —
+//! ninguna vive en ningún contrato, mismo motivo que el resto de esta
+//! lista. `rx_if_hz` es `Capabilities.rx_if_hz`/`spectrum_frame.
+//! center_freq_hz` (`crate::main::capabilities`, `crate::ray::
+//! build_spectrum_frame`): antes de esto salía en 0 sin más remedio.
+//! `drx_nco_fs_hz`/`drx_nco_word_bits` ahora también se publican tal cual
+//! en `Capabilities` (mismos valores, sin campo nuevo aquí) para que el RCP
+//! pueda verificarlos contra la especificación del DRx en vez de confiar a
+//! ciegas en esta variable de entorno.
 
 use std::env;
 use std::fmt;
@@ -38,6 +49,8 @@ pub struct ServiceConfig {
     pub drx_nco_fs_hz: f64,
     pub drx_nco_word_bits: u32,
     pub drx_trigger_fs_hz: f64,
+    pub tx_if_hz: f64,
+    pub rx_if_hz: f64,
     pub afc_tau_s: f64,
     pub afc_amp_threshold: f64,
     /// Si la fuente de datos de este despliegue es un simulador y no el DRx
@@ -68,6 +81,8 @@ impl ServiceConfig {
             drx_nco_fs_hz: parse_required("LAMULA_DSP_DRX_NCO_FS_HZ")?,
             drx_nco_word_bits: parse_required("LAMULA_DSP_DRX_NCO_WORD_BITS")?,
             drx_trigger_fs_hz: parse_required("LAMULA_DSP_DRX_TRIGGER_FS_HZ")?,
+            tx_if_hz: parse_required("LAMULA_DSP_TX_IF_HZ")?,
+            rx_if_hz: parse_required("LAMULA_DSP_RX_IF_HZ")?,
             afc_tau_s: parse_required("LAMULA_DSP_AFC_TAU_S")?,
             afc_amp_threshold: parse_required("LAMULA_DSP_AFC_AMP_THRESHOLD")?,
             simulated_source: parse_bool_required("LAMULA_DSP_SIMULATED_SOURCE")?,

@@ -77,13 +77,21 @@
 //!   pendiente (mapeo RCP, entrada 2): la máquina de estados con histéresis
 //!   (`Disabled`/`Manual`/`NoBurst`/`Wait`/`Track`/`Locked`) no existe, así
 //!   que no hay «estado del lazo» que reportar, sólo el bit binario de BITE.
-//! - `SpectrumFrame.center_freq_hz`/`span_hz` quedan a 0: el contrato
-//!   `DRx↔DSP` no expone frecuencia de muestreo ni sintonía del NCO, y la
-//!   página del algoritmo (`docs/algorithms/analizador-espectro-fi.md`) deja
-//!   ese mapeo fuera de `crates/spectrum-analyzer` — no hay de dónde
-//!   tomarlos en este repositorio todavía. Sólo se atiende el canal `RX_0`
+//! - `SpectrumFrame.center_freq_hz`/`span_hz` (issue #1 ítem 6, mapeo RCP
+//!   entrada 3, contrato v1.8) ya no quedan a 0: `span_hz` se deriva de
+//!   `config.gate_spacing_m` (mismo reloj implícito que ya usa el resto del
+//!   pipeline, sin dato nuevo del DRx) y `center_freq_hz` de
+//!   `ServiceConfig::rx_if_hz` (nuevo, no verificado contra el hardware
+//!   real, mismo tipo de hueco que `drx_nco_fs_hz` — ver su doc-comment).
+//!   Es la IF de recepción **nominal**, no la sintonía instantánea que el
+//!   AFC pueda tener aplicada — ver el doc-comment de
+//!   `crate::ray::build_spectrum_frame`. `drx_nco_fs_hz`/`drx_nco_word_bits`
+//!   y las nuevas `tx_if_hz`/`rx_if_hz` también se publican en
+//!   `Capabilities` para que el RCP pueda verificarlos, no sólo el DSP
+//!   usarlos internamente. Sólo se atiende el canal `RX_0`
 //!   (`crate::ray::build_spectrum_frame`): la selección de canal por
-//!   `request_spectrum` tampoco tiene campo en el contrato v1.2.
+//!   `request_spectrum` tampoco tiene campo en el contrato (mapeo RCP
+//!   entrada 6, sigue sin cerrar).
 //! - Censura por `sig_threshold`/`sqi_threshold`/`log_threshold`, y por
 //!   separado la de ZDR/ρHV/ΦDP/KDP: ver el doc-comment de `crate::ray`.
 //!   `ccor_threshold` no se aplica (no hay CCOR que evaluar). El desdoblado
@@ -205,7 +213,7 @@ async fn main() {
     let mut down = link.down;
     let up = link.up;
 
-    let mut session = Session::new(capabilities());
+    let mut session = Session::new(capabilities(&cfg));
     let mut assembler: Option<RadialAssembler> = None;
     let mut ray_seq: u32 = 0;
     let mut first_ray_after_config = false;
@@ -430,7 +438,9 @@ async fn handle_down_message(
                     let _ = up.send(UpMessage::Status(status)).await;
                 }
                 command::REQUEST_CAPABILITIES => {
-                    let _ = up.send(UpMessage::Capabilities(capabilities())).await;
+                    let _ = up
+                        .send(UpMessage::Capabilities(capabilities(svc_cfg)))
+                        .await;
                 }
                 command::REQUEST_SPECTRUM => {
                     // Oportunista sobre el último radial ensamblado: sin uno
@@ -440,9 +450,12 @@ async fn handle_down_message(
                     // que un `request_status` antes de la primera ráfaga.
                     if let (Some(radial), Some(cfg_snapshot)) = (last_radial, session.config()) {
                         *spectrum_seq = spectrum_seq.wrapping_add(1);
-                        if let Some(msg) =
-                            ray::build_spectrum_frame(radial, cfg_snapshot, *spectrum_seq)
-                        {
+                        if let Some(msg) = ray::build_spectrum_frame(
+                            radial,
+                            cfg_snapshot,
+                            *spectrum_seq,
+                            svc_cfg.rx_if_hz,
+                        ) {
                             let _ = up.send(msg).await;
                         }
                     }
@@ -471,7 +484,7 @@ async fn handle_down_message(
 /// `crate` para por qué no hay más. `max_gates`/`max_pulses` son el techo del
 /// tipo de cable (`n_gates`/`n_pulses` son `u16`), no un límite de hardware
 /// medido — ningún documento del repo da uno real.
-fn capabilities() -> Capabilities {
+fn capabilities(svc_cfg: &ServiceConfig) -> Capabilities {
     Capabilities {
         moment_mask: (1 << moment_kind::UZ)
             | (1 << moment_kind::CZ)
@@ -489,7 +502,15 @@ fn capabilities() -> Capabilities {
         max_gates: u16::MAX as u32,
         max_pulses: u16::MAX,
         n_rx_channels: 2,
-        pad0: 0,
+        // `u8::try_from` y no `as u8`: un ancho de acumulador que no cabe en
+        // un byte es una `LAMULA_DSP_DRX_NCO_WORD_BITS` mal escrita, no un
+        // valor real de ningún NCO conocido — mejor abortar aquí que
+        // publicar un dato de capacidad truncado y equivocado al RCP.
+        rx_nco_word_bits: u8::try_from(svc_cfg.drx_nco_word_bits)
+            .expect("LAMULA_DSP_DRX_NCO_WORD_BITS no cabe en un byte"),
+        tx_if_hz: svc_cfg.tx_if_hz as f32,
+        rx_if_hz: svc_cfg.rx_if_hz as f32,
+        rx_nco_fs_hz: svc_cfg.drx_nco_fs_hz as f32,
     }
 }
 

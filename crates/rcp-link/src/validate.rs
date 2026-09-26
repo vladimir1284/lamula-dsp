@@ -163,7 +163,10 @@ mod tests {
             max_gates: 2000,
             max_pulses: 128,
             n_rx_channels: 2,
-            pad0: 0,
+            rx_nco_word_bits: 0,
+            tx_if_hz: 0.0,
+            rx_if_hz: 0.0,
+            rx_nco_fs_hz: 0.0,
         }
     }
 

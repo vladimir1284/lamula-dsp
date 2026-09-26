@@ -692,6 +692,34 @@ y compara byte a byte los campos relayados y convertidos; más unitarios de
 en `crate::ray`. `cargo build`/`clippy -D warnings`/`fmt --check`/`test
 --workspace` limpios (contrato sigue en v1.7, esto no lo tocó).
 
+**IF de Tx/Rx y frecuencia de muestreo del DRx (issue #1 ítem 6, mapeo RCP
+entrada 3) — `span_hz` resultó gratis, `center_freq_hz` sí necesitaba un
+dato nuevo.** El síntoma medible era `spectrum_frame.center_freq_hz`/
+`span_hz` en 0 (ver más abajo, "Analizador de espectro de FI"). Investigando
+`span_hz` ("anchura total barrida") se encontró que no hace falta ningún
+dato del DRx que no exista ya: las muestras de una captura de
+`build_spectrum_frame` están espaciadas en tiempo rápido por
+`fast_time_dt_s(config)` (`config.gate_spacing_m`, ya en el contrato desde
+v1.0) — el mismo reloj implícito que ya fija el tamaño de celda para todo
+el resto del pipeline, no el `FS_HZ` que D-02 evita a propósito. Así que
+`span_hz = 1/fast_time_dt_s(config)`, sin campo nuevo. `center_freq_hz` sí
+era un hueco real: la sintonía del NCO de recepción del DRx no existe en
+ningún sitio de este repositorio. Se añadió `ServiceConfig::rx_if_hz`
+(nuevo, mismo tipo de parámetro sin verificar contra hardware real que
+`drx_nco_fs_hz`) y se usa tal cual — la IF nominal de instalación, no el
+offset instantáneo que el AFC pueda tener aplicado ahora mismo (eso queda
+fuera de este ítem). De paso se publican en `Capabilities` (contrato
+v1.7→v1.8, aditivo: `tx_if_hz`, `rx_if_hz`, `rx_nco_fs_hz`, y
+`rx_nco_word_bits` reemplazando el `pad0` de v1.6) tanto las dos IF nuevas
+como `drx_nco_fs_hz`/`drx_nco_word_bits` — hasta ahora esos dos últimos
+sólo los usaba el DSP internamente para el lazo de AFC
+(`lamula_burst::nco_phase_inc_for_freq_offset`); publicarlos deja al RCP
+verificarlos contra la especificación real del DRx en vez de confiar a
+ciegas en la variable de entorno del binario. Tests nuevos: aserciones de
+`center_freq_hz`/`span_hz` en `ray::tests::spectrum_frame_places_tone_at_correct_bin_and_level`,
+capa de layout de `Capabilities` actualizada. `cargo build`/`clippy -D
+warnings`/`fmt --check`/`test --workspace` limpios, contrato v1.8.
+
 **Analizador de espectro de FI (`crates/spectrum-analyzer`) →
 `crates/service::ray` — cerrado el hueco de contrato, cableada la captura
 oportunista.** `crates/spectrum-analyzer` (periodograma de Welch, ganancia
@@ -731,7 +759,10 @@ quedan en 0 — el contrato `DRx↔DSP` no expone frecuencia de muestreo ni
 sintonía del NCO, y la página del algoritmo deja ese mapeo fuera de
 `crates/spectrum-analyzer` por ser "mapeo de configuración, no un
 algoritmo"; no hay de dónde tomarlos en este repositorio todavía, ni
-siquiera con el contrato ya cerrado. `ref_level_dbm` usa
+siquiera con el contrato ya cerrado. **Actualización:** cerrado más arriba
+("IF de Tx/Rx y frecuencia de muestreo del DRx", issue #1 ítem 6) —
+`span_hz` no necesitaba dato nuevo (`fast_time_dt_s(config)`),
+`center_freq_hz` usa `ServiceConfig::rx_if_hz` nuevo. `ref_level_dbm` usa
 `config.receiver_gain_db` sin la calibración fina adicional que menciona la
 página, que tampoco está modelada en este contrato. Sin promediado entre
 `request_spectrum` sucesivos: cada mandato dispara un periodograma sobre el

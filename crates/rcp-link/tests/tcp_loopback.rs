@@ -174,7 +174,10 @@ async fn simulated_source_flag_is_stamped_on_every_up_frame() {
         max_gates: 1,
         max_pulses: 1,
         n_rx_channels: 1,
-        pad0: 0,
+        rx_nco_word_bits: 0,
+        tx_if_hz: 0.0,
+        rx_if_hz: 0.0,
+        rx_nco_fs_hz: 0.0,
     };
     link.up.send(UpMessage::Capabilities(caps)).await.unwrap();
 

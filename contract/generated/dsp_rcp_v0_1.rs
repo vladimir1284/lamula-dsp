@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.7 — lado DSP.
+// Contrato DSP↔RCP v1.8 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 7;
+pub const VERSION_MINOR: u8 = 8;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -321,7 +321,7 @@ pub const SELFTEST_RESULT_SIZE: usize = 16;
 /// mandato `request_capabilities`, y es lo que permite al RCP no ofrecer al
 /// operador un modo que el procesador no implementa.
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Capabilities {
     /// Momentos que este DSP puede producir, un bit por momento.
     pub moment_mask: u32,
@@ -335,10 +335,16 @@ pub struct Capabilities {
     pub max_pulses: u16,
     /// Canales de recepción que procesa.
     pub n_rx_channels: u8,
-    /// Relleno explícito; vale 0.
-    pub pad0: u8,
+    /// Anchura del acumulador de fase del NCO de recepción del DRx, bits (`lamula_burst::nco_phase_inc_for_freq_offset`). Constante de instalación, no medida; publicada para que el RCP pueda verificarla contra la especificación del DRx en vez de confiar a ciegas en la variable de entorno del DSP que la fija. Consume el relleno explícito v1.7 (`pad0`), mismo tamaño.
+    pub rx_nco_word_bits: u8,
+    /// Frecuencia intermedia de transmisión, Hz. Constante de instalación, no medida — mapeo RCP entrada 3.
+    pub tx_if_hz: f32,
+    /// Frecuencia intermedia de recepción, Hz. Constante de instalación, no medida. Es `spectrum_frame.center_freq_hz` (`crate::ray::build_spectrum_frame`): antes salía en 0 por falta de este dato.
+    pub rx_if_hz: f32,
+    /// Frecuencia de referencia del NCO de recepción del DRx, Hz (`ServiceConfig::drx_nco_fs_hz`). Publicada por el mismo motivo que `rx_nco_word_bits`: hoy es variable de entorno sin forma de verificarla contra el DRx real.
+    pub rx_nco_fs_hz: f32,
 }
-pub const CAPABILITIES_SIZE: usize = 20;
+pub const CAPABILITIES_SIZE: usize = 32;
 
 /// Configuración completa. Se aplica de forma atómica: o entra entera o se
 /// rechaza entera y el estado anterior se preserva.

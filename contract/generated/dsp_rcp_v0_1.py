@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v1.7 — lado RCP y
+Contrato DSP↔RCP v1.8 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 1
-VERSION_MINOR = 7
+VERSION_MINOR = 8
 
 @dataclass
 class Header:
@@ -264,9 +264,9 @@ class SelftestResult:
 class Capabilities:
     """Qué sabe hacer esta compilación del DSP. Se responde a un control con"""
 
-    FORMAT = "<IIIIHBB"
-    SIZE = 20
-    FIELDS = ("moment_mask", "dealias_mask", "estimator_mask", "max_gates", "max_pulses", "n_rx_channels", "pad0",)
+    FORMAT = "<IIIIHBBfff"
+    SIZE = 32
+    FIELDS = ("moment_mask", "dealias_mask", "estimator_mask", "max_gates", "max_pulses", "n_rx_channels", "rx_nco_word_bits", "tx_if_hz", "rx_if_hz", "rx_nco_fs_hz",)
 
     moment_mask: int = 0
     dealias_mask: int = 0
@@ -274,7 +274,10 @@ class Capabilities:
     max_gates: int = 0
     max_pulses: int = 0
     n_rx_channels: int = 0
-    pad0: int = 0
+    rx_nco_word_bits: int = 0
+    tx_if_hz: float = 0.0
+    rx_if_hz: float = 0.0
+    rx_nco_fs_hz: float = 0.0
 
     def pack(self) -> bytes:
         return struct.pack(self.FORMAT, *(getattr(self, name) for name in self.FIELDS))

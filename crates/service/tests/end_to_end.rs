@@ -177,6 +177,8 @@ async fn service_binary_wires_drx_to_rcp() {
             .env("LAMULA_DSP_DRX_NCO_FS_HZ", "250000000.0")
             .env("LAMULA_DSP_DRX_NCO_WORD_BITS", "32")
             .env("LAMULA_DSP_DRX_TRIGGER_FS_HZ", "250000000.0")
+            .env("LAMULA_DSP_TX_IF_HZ", "60000000.0")
+            .env("LAMULA_DSP_RX_IF_HZ", "60000000.0")
             .env("LAMULA_DSP_AFC_TAU_S", "2.0")
             .env("LAMULA_DSP_AFC_AMP_THRESHOLD", "0.01")
             // Este test alimenta el binario con un DRx de mentira, así que
