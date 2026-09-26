@@ -1003,6 +1003,67 @@ RCP**: un lector construido contra la redacción vieja del campo que valide `fla
 despliegue simulado; conviene confirmar con el equipo de RCP que ningún build desplegado haga esa comprobación
 antes de encender `LAMULA_DSP_SIMULATED_SOURCE=true` contra un RCP existente.
 
+**2026-09-26: SZ(8/64) — decodificación del trip fuerte cableada en
+`crates/service::ray`; trip débil y alineación de hardware siguen abiertos.**
+El párrafo "SZ(8/64) — oráculo hecho..." de arriba, y la propia página del
+algoritmo, señalaban el cableo como bloqueado por falta de campo de
+contrato — pero ese campo ya existía desde el ítem "2026-09-16" de arriba
+(`config.range_dealias_mode::SZ_8_64`, `capability_flag::sz864`); lo que de
+verdad faltaba era el sitio de llamada. `sz864_decode_trip1`
+(`crates/service::ray`) multiplica cada pulso de todo canal (salvo el propio
+canal de burst) por `e^{-iψ_k}` — `ψ_k` de `lamula_sz864::sz_8_64_phases`,
+generado localmente, no medido — al principio de `build_moment_ray`, mismo
+lugar y mismo rol estructural que `burst_phase_correct` para magnetrón. A
+diferencia de esa vía, no necesita canal de burst ni radial anterior: el
+código se conoce de antemano, así que la decodificación corre sobre TODAS
+las celdas del radial, y un radial `SZ_8_64` no entra en el bloque de
+detección/censura cross-radial que sí usa `RANDOM_PHASE` — no hace falta,
+`separate_trips` (bien: sólo su primer paso, ver abajo) separa siempre que
+corre, no sólo cuando se detecta contaminación.
+
+**Alcance deliberadamente mínimo: sólo el trip fuerte.** `sz864_decode_trip1`
+no llama a `lamula_sz864::separate_trips` — reimplementa únicamente su primer
+paso (decodificar) porque el segundo (notch + recoherencia para aislar el
+trip débil) no tiene a dónde publicarse: el contrato no tiene campo para un
+segundo conjunto de momentos por celda, y crearlo es una decisión de alcance
+que esta sesión no tomó unilateralmente. El trip débil queda, como ya
+aceptaba el propio oráculo, como energía no removida que eleva el piso de
+ruido efectivo de R0/SQI — mismo criterio de alcance mínimo que `RANDOM_PHASE`
+ya aceptaba para su propio residuo no recuperado.
+
+**Test de cableo** (`ray::tests::sz864_decode_recovers_strong_trip_velocity_with_second_trip_overlaid`,
+mismo patrón que `mixed_echo` de `crates/sz864/tests/against_oracle.rs`
+Prueba 2): trip fuerte y un trip débil a −10 dB, codificados con SZ(8/64) y
+superpuestos en la misma celda. Sin decodificar, V sale `NaN` (censurado por
+SQI bajo, no sólo sesgado — la modulación de fase por sí sola arruina la
+autocovarianza) o lejos de la verdad; decodificado, V se acerca a la
+velocidad del trip fuerte dentro de 1 m/s. Un segundo trip de igual potencia
+(0 dB) se probó y descartó para este test: censura el gate por SNR bajo una
+vez decodificado (el trip débil blanqueado a ruido compite en potencia con el
+fuerte), un resultado válido pero que no aísla lo que el test quiere mostrar
+— no un límite del propio decode. `cargo build`/`cargo test --workspace`
+(prueba nueva incluida)/`cargo clippy --all-targets -- -D warnings`/
+`cargo fmt --check` en verde.
+
+**Lo que esto NO resuelve — dos huecos, de naturaleza distinta.**
+(1) **Supuesto de hardware sin verificar, bloquea hardware real**:
+`sz864_decode_trip1` asume que `radial.trigger_count_start` (contador de
+disparos del wire `DRx↔DSP`) es el mismo índice `k` que usa el excitador para
+generar `ψ_k`, módulo `CODE_PERIOD` (32 pulsos), y que el excitador no
+reinicia su contador de forma independiente del de disparos. Ningún contrato
+de este repositorio declara esa relación — inferencia de arquitectura, no
+campo confirmado; si es falsa, la decodificación pierde coherencia en
+silencio (mismo tipo de riesgo que ya señala este documento para
+`nco_phase_inc_for_freq_offset`). Confirmar con el equipo de excitador/DRx
+antes de operar contra hardware real. (2) **Trip débil, deliberadamente fuera
+de esta sesión**: publicarlo exige antes decidir cómo el contrato expondría
+un segundo conjunto de momentos por celda (alcance nuevo, no un hueco de
+algoritmo — `separate_trips` ya lo calcula, sólo falta dónde ponerlo) y,
+aparte de eso, terminar de contrastar potencia/ancho espectral del trip
+fuerte y ambos del débil, que el propio oráculo ya declaraba fuera de
+alcance. Ninguno de los dos bloquea lo que sí quedó cerrado: recuperación de
+la velocidad del trip fuerte para instalación klistrón con SZ864 activo.
+
 ## Abierto (cross-proyecto): banco de pruebas extremo a extremo contra ZedBoard real
 
 Identificado en revisión de integración cruzada, 2026-09-17. Dueño: los tres equipos (DRx + DSP +

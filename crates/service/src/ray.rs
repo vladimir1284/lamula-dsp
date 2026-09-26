@@ -168,15 +168,28 @@
 //! coherente el segundo trip es igual de determinista que el primero y
 //! corregir con la fase de éste no decorrelaciona nada — ahí sigue aplicando
 //! sólo detección y marcado. `range_dealias_mode::SZ_8_64` (v0.3 del
-//! contrato, `docs/algorithms/sz-second-trip-recovery.md`) declara la vía
-//! de recuperación por codificación de fase para instalación klistrón, pero
-//! sigue sin cablear aquí a propósito: exige `crates/sz864::separate_trips`
-//! sobre la serie compleja cruda por pulso (este módulo hoy sólo ve
-//! `uz_values`/`v_values`/`cz_values` ya reducidos a momentos) y el canal
-//! DRx que le da al excitador el patrón de fase a transmitir — ninguno de
-//! los dos existe todavía. Un radial configurado con `SZ_8_64` no entra en
-//! este bloque: no se censura ni se recupera nada, exactamente como si
-//! `range_dealias_mode` fuera `NONE`.
+//! contrato, `docs/algorithms/sz-second-trip-recovery.md`) declara la vía de
+//! recuperación por codificación de fase para instalación klistrón —
+//! **cableada** vía [`sz864_decode_trip1`], llamada al principio de
+//! [`build_moment_ray`] igual que [`burst_phase_correct`], pero sin
+//! necesitar canal de burst: el código `ψ_k` es conocido de antemano
+//! (`lamula_sz864::sz_8_64_phases`), no medido. Decodifica TODA celda de
+//! todo canal (salvo el propio canal de burst) al trip fuerte antes de
+//! cualquier pulse-pair — por eso este radial no entra en el bloque de
+//! detección/censura cross-radial de más abajo: no hace falta, la
+//! recuperación no depende de comparar con el radial anterior (a
+//! diferencia de `RANDOM_PHASE`, que sólo puede *detectar* contaminación
+//! así, `separate_trips` la separa siempre que corra, con el trip fuerte
+//! validado contra oráculo en todo el barrido de razón de potencias
+//! -10..10 dB). Sólo se cablea el trip fuerte (`strong` de
+//! `lamula_sz864::separate_trips`, sin llamar a esa función: el paso de
+//! notch+recoherencia que aislaría el trip débil no tiene campo de
+//! contrato para publicarse como segundo conjunto de momentos por celda) —
+//! el trip débil queda como energía no removida en R0/SQI, mismo criterio
+//! de alcance mínimo que ya aceptó `RANDOM_PHASE` para su propio trip
+//! residual. Ver el doc-comment de [`sz864_decode_trip1`] para el supuesto
+//! de hardware sin verificar (alineación de `trigger_count_start` con el
+//! índice de pulso del excitador).
 
 use lamula_attenuation::zphi_correct_dbz_accurate;
 use lamula_burst::{burst_phase_estimate, correct_phase};
@@ -201,6 +214,7 @@ use lamula_rfi::{detect_rfi_mask, DEFAULT_RFI_MEDIAN_DB, DEFAULT_RFI_WIDTH_MAX_B
 use lamula_spectral::{bin_velocity, hann_window, periodogram_hann, spectral_moments};
 use lamula_spectrum_analyzer::{hann_window as welch_hann_window, welch_trace_dbm};
 use lamula_staggered_prt::staggered_pulse_pair_velocities;
+use lamula_sz864::{sz_8_64_phases, CODE_PERIOD};
 use rustfft::num_complex::Complex64;
 use std::borrow::Cow;
 
@@ -674,6 +688,73 @@ fn burst_phase_correct(radial: &AssembledRadial, config: &Config) -> Option<Asse
     Some(corrected)
 }
 
+/// Decodificación SZ(8/64) al trip fuerte
+/// (`docs/algorithms/sz-second-trip-recovery.md` §"Cómo funciona la
+/// codificación de fase aleatoria (SZ)", `config.range_dealias_mode ==
+/// range_dealias_mode::SZ_8_64`): multiplica cada pulso de todo canal que no
+/// sea el propio canal de burst por `e^{-iψ_k}`, el código que el excitador
+/// aplicó en transmisión. El trip del rango actual (coherente con `ψ_k`)
+/// queda con fase Doppler pura — lo que necesita `pulse_pair_moments` — y el
+/// trip solapado (viajó un PRT más, código efectivo `ψ_{k-1}`) queda
+/// modulado por el residuo `φ_k = ψ_{k-1} − ψ_k`, que HS74 blanquea a ruido
+/// de banda ancha en vez de contaminar la fase del trip fuerte. Mismo rol
+/// estructural que [`burst_phase_correct`], pero universal: no depende de
+/// canal de burst wireado (el código se conoce de antemano, no se mide), así
+/// que corre sobre TODAS las celdas del radial, sin distinguir cuáles tienen
+/// evidencia de segundo trip.
+///
+/// **Sólo decodifica el trip fuerte.** El paso de notch+recoherencia que
+/// [`lamula_sz864::separate_trips`] usa para aislar el trip débil no se
+/// llama aquí — no hay campo de contrato para publicar un segundo conjunto
+/// de momentos por celda, mismo alcance mínimo que ya aceptó el bloque
+/// `RANDOM_PHASE` (ver el doc-comment del módulo). El trip débil queda como
+/// energía no removida en R0/SQI, sin corrección adicional.
+///
+/// **Supuesto de hardware sin verificar**: el índice de pulso `k` que arma
+/// el código (`ψ_k`, periódico cada [`CODE_PERIOD`] pulsos) tiene que
+/// coincidir exactamente con el que usa el excitador para generar su fase
+/// programada — se asume que `radial.trigger_count_start` (el contador de
+/// disparos que ya viaja en el wire `DRx↔DSP`) ES ese mismo índice, módulo
+/// `CODE_PERIOD`, y que el excitador nunca reinicia su propio contador de
+/// forma independiente del contador de disparos del DRx. Ningún contrato de
+/// este repositorio (`DRx↔DSP` ni `DSP↔RCP`) declara esa relación — es
+/// inferencia de arquitectura, no un campo confirmado. Si la relación real
+/// es otra (offset constante, o el contador del excitador se reinicia en
+/// `START` mientras el de disparos no), este cableo decodifica con el `k`
+/// equivocado y la coherencia del trip fuerte se pierde en silencio —
+/// confirmar con el equipo de excitador/DRx antes de operar esto contra
+/// hardware real, mismo tipo de riesgo que ya señala
+/// `docs/algorithms/roadmap.md` para `nco_phase_inc_for_freq_offset`.
+///
+/// Devuelve `None` (sin tocar nada) si `config.range_dealias_mode !=
+/// range_dealias_mode::SZ_8_64` o si el radial no trae pulsos.
+fn sz864_decode_trip1(radial: &AssembledRadial, config: &Config) -> Option<AssembledRadial> {
+    if config.range_dealias_mode != range_dealias_mode::SZ_8_64 {
+        return None;
+    }
+    let n_pulses = radial.ray_flags.len();
+    if n_pulses == 0 {
+        return None;
+    }
+    let k0 = radial.trigger_count_start as usize % CODE_PERIOD;
+    let (psi_full, _phi_full) = sz_8_64_phases(k0 + n_pulses);
+    let psi = &psi_full[k0..];
+
+    let burst_idx = radial.channel_index(channel::TX_BURST_0);
+    let mut corrected = radial.clone();
+    for (c, ch) in corrected.channels.iter_mut().enumerate() {
+        if Some(c) == burst_idx {
+            continue;
+        }
+        for bin in ch.iter_mut() {
+            for (p, sample) in bin.iter_mut().enumerate() {
+                *sample = correct_phase(*sample, psi[p]);
+            }
+        }
+    }
+    Some(corrected)
+}
+
 /// Traza de espectro de FI oportunista
 /// (`docs/algorithms/analizador-espectro-fi.md` §"Cómo funciona") sobre el
 /// mismo radial que ya trae el pipeline: para cada pulso, la serie de
@@ -749,6 +830,16 @@ pub fn build_moment_ray(
     // parámetro original sin copiar nada.
     let burst_corrected = burst_phase_correct(radial, config);
     let radial: &AssembledRadial = burst_corrected.as_ref().unwrap_or(radial);
+
+    // Instalación klistrón con `range_dealias_mode::SZ_8_64`: decodifica al
+    // trip fuerte antes que cualquier otra cosa, mismo lugar y mismo motivo
+    // que `burst_phase_correct` arriba — ver el doc-comment de
+    // `sz864_decode_trip1`. Encadenado, no exclusivo con la corrección de
+    // burst: en una instalación real sólo uno de los dos debería aplicar
+    // (`burst_window_bins` normalmente en 0 con SZ864 activo, ver el
+    // doc-comment del módulo, Eje 1), pero nada en este código lo impone.
+    let sz864_decoded = sz864_decode_trip1(radial, config);
+    let radial: &AssembledRadial = sz864_decoded.as_ref().unwrap_or(radial);
 
     let wavelength_m = config.wavelength_m as f64;
     let mean_prt_s = 1.0 / config.prf_hz as f64;
@@ -2134,6 +2225,134 @@ mod tests {
             (corrected_v - V_TRUE).abs() < 1.0,
             "corregido, V ({corrected_v}) debería acercarse a v_true={V_TRUE}"
         );
+    }
+
+    #[test]
+    fn sz864_decode_recovers_strong_trip_velocity_with_second_trip_overlaid() {
+        // Mismo escenario que `crates/sz864/tests/against_oracle.rs`
+        // (`mixed_echo`, Prueba 2 del oráculo): trip fuerte (rango actual,
+        // `V_TRUE1`) superpuesto con un trip débil de igual potencia
+        // (`V_TRUE2`, código efectivo `ψ_{k-1}` porque viajó un PRT más),
+        // codificados con SZ(8/64) en transmisión. Sin decodificar, V no
+        // significa nada (la propia modulación sistemática arruina la
+        // autocovarianza, no sólo el trip solapado); decodificando
+        // (`sz864_decode_trip1`, cableado al principio de `build_moment_ray`
+        // para `range_dealias_mode::SZ_8_64`), V se acerca a `V_TRUE1` —sin
+        // necesitar radial anterior ni detección cross-radial, a diferencia
+        // de `RANDOM_PHASE`.
+        const V_TRUE1: f64 = 5.0;
+        const V_TRUE2: f64 = -10.0;
+        const WAVELENGTH_M: f64 = 0.10;
+        const PRT_S: f64 = 1.0e-3;
+        const M: usize = 64;
+
+        let mut rng = StdRng::seed_from_u64(20260926);
+        let (psi, _phi) = sz_8_64_phases(M);
+
+        let cell1 = CellParams {
+            power_s: 1.0,
+            mean_v: V_TRUE1,
+            sigma_v: 1.5,
+            wavelength_m: WAVELENGTH_M,
+            prt_s: PRT_S,
+            m: M,
+            noise_floor: 0.02,
+        };
+        let cell2 = CellParams {
+            // Trip débil a -10 dB del fuerte: suficiente para arruinar la
+            // fase sin decodificar (ver el primer assert) sin además
+            // censurar el gate por SNR bajo una vez decodificado (el trip
+            // débil blanqueado a ruido sí eleva el piso de ruido efectivo,
+            // ver el doc-comment de `sz864_decode_trip1` — 0 dB, probado
+            // antes de fijar esta razón, censura el gate en vez de sólo
+            // sesgarlo, un caso válido pero que no aísla lo que este test
+            // quiere mostrar).
+            power_s: 0.1,
+            mean_v: V_TRUE2,
+            sigma_v: 1.5,
+            wavelength_m: WAVELENGTH_M,
+            prt_s: PRT_S,
+            m: M,
+            noise_floor: 0.02,
+        };
+        let x1 = generate_cell(&cell1, &mut rng);
+        let x2 = generate_cell(&cell2, &mut rng);
+
+        // Composición del eco: el trip fuerte lleva el código del pulso
+        // actual (`psi[k]`), el débil el del pulso anterior (`psi[k-1]`,
+        // viajó un PRT más) — mismo criterio que `mixed_echo` de
+        // `crates/sz864/tests/against_oracle.rs`.
+        let y: Vec<Complex64> = (0..M)
+            .map(|k| {
+                let psi_prev = psi[(k + M - 1) % M];
+                x1[k] * Complex64::from_polar(1.0, psi[k])
+                    + x2[k] * Complex64::from_polar(1.0, psi_prev)
+            })
+            .collect();
+
+        let radial = radial_from_channels(vec![vec![y]]);
+
+        let base_config = Config {
+            moment_mask: 1 << moment_kind::V,
+            wavelength_m: WAVELENGTH_M as f32,
+            prf_hz: (1.0 / PRT_S) as f32,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+        let undecoded_config = Config {
+            range_dealias_mode: range_dealias_mode::NONE,
+            ..base_config
+        };
+        let decoded_config = Config {
+            range_dealias_mode: range_dealias_mode::SZ_8_64,
+            ..base_config
+        };
+
+        fn v_of(msg: &UpMessage) -> f64 {
+            let UpMessage::MomentRay { moments, .. } = msg else {
+                panic!("se esperaba MomentRay");
+            };
+            moments
+                .iter()
+                .find(|m| m.field.kind == moment_kind::V)
+                .expect("falta el bloque de V")
+                .values[0] as f64
+        }
+
+        let (undecoded_msg, _) =
+            build_moment_ray(&radial, &undecoded_config, 1, false, 1_000_000, 0.0, None);
+        let (decoded_msg, _) =
+            build_moment_ray(&radial, &decoded_config, 1, false, 1_000_000, 0.0, None);
+
+        let undecoded_v = v_of(&undecoded_msg);
+        let decoded_v = v_of(&decoded_msg);
+
+        // Sin decodificar, la modulación de fase sistemática por sí sola ya
+        // arruina la autocovarianza de retardo 1 (no sólo el trip solapado,
+        // ver el doc-comment de `sz864_decode_trip1`) — SQI cae lo bastante
+        // como para censurar (`V` sale `NaN`), no sólo sesgarse; cualquiera
+        // de los dos resultados confirma que sin decodificar el valor no
+        // sirve.
+        assert!(
+            undecoded_v.is_nan() || (undecoded_v - V_TRUE1).abs() > 2.0,
+            "sin decodificar, V ({undecoded_v}) no debería acercarse a v_true1={V_TRUE1}"
+        );
+        assert!(
+            (decoded_v - V_TRUE1).abs() < 1.0,
+            "decodificado, V ({decoded_v}) debería acercarse a v_true1={V_TRUE1}"
+        );
+    }
+
+    #[test]
+    fn sz864_decode_is_noop_without_sz_8_64_mode() {
+        // `range_dealias_mode != SZ_8_64` no debe tocar el radial en
+        // absoluto — mismo criterio que `burst_phase_correct` con
+        // `burst_window_bins == 0`.
+        let radial = radial_from_channels(vec![vec![vec![
+            Complex64::new(1.0, 0.0),
+            Complex64::new(0.5, 0.5),
+        ]]]);
+        let config = config_with_thresholds(3.0, 0.4, -100.0);
+        assert!(sz864_decode_trip1(&radial, &config).is_none());
     }
 
     #[test]

@@ -337,6 +337,7 @@ dependencies = [
  "lamula-spectral",
  "lamula-spectrum-analyzer",
  "lamula-staggered-prt",
+ "lamula-sz864",
  "rand",
  "rand_distr",
  "rustfft",

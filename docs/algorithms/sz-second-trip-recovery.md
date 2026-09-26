@@ -76,14 +76,38 @@ Reutiliza sin reimplementar `lamula_burst::correct_phase`,
 mismas exclusiones que el oráculo (ver arriba): sólo velocidad está
 contrastada para el trip débil, no potencia ni ancho espectral.
 
-**Sin cablear en `crates/service::ray`.** Este crate es librería pura, sin
-sitio de llamada en el pipeline — cablearlo exige antes decidir cómo el
-contrato declara "instalación klistrón con código SZ activo" (algo análogo a
-`polarization_mode`/`antenna_isolation_db`: un campo nuevo, no una inferencia
-de `capability_flags::range_dealias` existente, que hoy no distingue esta
-vía de la de fase aleatoria en magnetrón) y cómo el excitador recibe el
-patrón de fase pulso a pulso a transmitir — trabajo de contrato e
-integración con DRx, no de algoritmo.
+**Cableado parcialmente en `crates/service::ray` (2026-09-26).** El campo de
+contrato que este párrafo pedía ya existe desde 2026-09-16
+(`config.range_dealias_mode`, enumeración `NONE`/`RANDOM_PHASE`/`SZ_8_64`, más
+`capability_flag::sz864` — ver `docs/algorithms/roadmap.md` §"Decisiones
+cerradas"); lo que faltaba de verdad no era el campo, era el sitio de llamada.
+`sz864_decode_trip1` (`crates/service::ray`) decodifica al trip fuerte —
+multiplica cada pulso por `e^{-iψ_k}` — al principio de `build_moment_ray`,
+mismo lugar y mismo rol estructural que la corrección de fase de burst para
+magnetrón, pero sin necesitar canal de burst: el código se conoce de
+antemano (`sz_8_64_phases`), no se mide. **Sólo el trip fuerte**: el paso de
+notch+recoherencia de `separate_trips` que aislaría el trip débil no se llama
+— no hay campo de contrato para publicar un segundo conjunto de momentos por
+celda, así que el trip débil queda como energía no removida en R0/SQI, sin
+corrección adicional (mismo alcance mínimo que ya aceptó `RANDOM_PHASE` para
+su propio residuo). No hace falta radial anterior ni detección cross-radial
+para esto — a diferencia de `RANDOM_PHASE`, la recuperación no depende de
+comparar con el radial anterior, así que un radial `SZ_8_64` no entra en el
+bloque de detección/censura que sí usa `RANDOM_PHASE`. Test de cableo
+(`ray::tests::sz864_decode_recovers_strong_trip_velocity_with_second_trip_overlaid`):
+trip fuerte y débil (−10 dB) superpuestos y codificados, V se acerca al
+verdadero sólo decodificando.
+
+**Supuesto de hardware sin verificar, bloquea operar esto contra hardware
+real**: `sz864_decode_trip1` asume que `radial.trigger_count_start` (el
+contador de disparos del wire `DRx↔DSP`) es el mismo índice de pulso `k` que
+usa el excitador para generar `ψ_k`, módulo `CODE_PERIOD` (32 pulsos) — y que
+el excitador nunca reinicia su propio contador de forma independiente del de
+disparos. Ningún contrato de este repositorio declara esa relación; hay que
+confirmarla con el equipo de excitador/DRx antes de desplegar. Sigue sin
+tocar el canal por el que el excitador recibe el patrón de fase a
+transmitir — eso es integración con DRx, no algoritmo, y sigue sin
+emprender.
 
 ## Criterio de aceptación
 
