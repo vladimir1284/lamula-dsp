@@ -117,7 +117,7 @@ fn pipeline_survives_thousands_of_varied_radials_without_panicking_or_publishing
             antenna_isolation_db: 0.0,
             wavelength_m: 0.10,
             polarization_mode: 0,
-            pad0: 0,
+            transmitter_type: 0,
             burst_window_bins: 0,
         };
 

@@ -409,7 +409,7 @@ fn decode_config_body(body: &[u8]) -> Result<Config, RcpLinkError> {
         antenna_isolation_db: f32::from_le_bytes(body[72..76].try_into().unwrap()),
         wavelength_m: f32::from_le_bytes(body[76..80].try_into().unwrap()),
         polarization_mode: body[80],
-        pad0: body[81],
+        transmitter_type: body[81],
         burst_window_bins: u16::from_le_bytes(body[82..84].try_into().unwrap()),
     })
 }

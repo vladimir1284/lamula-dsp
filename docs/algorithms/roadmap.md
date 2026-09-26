@@ -562,7 +562,9 @@ nuevas y obligatorias, `LAMULA_DSP_DRX_NCO_FS_HZ`/`LAMULA_DSP_DRX_NCO_WORD_BITS`
 sin valor por defecto inventado — bloquea confirmar la corrección real contra
 hardware DRx, no bloquea el resto del cableo. `crates/service::ray` gana
 `afc_burst_sample` (pulso 0 del canal de burst, gated por
-`MAGNETRON_TRANSMITTER` igual que `recover_trip1`) y `fast_time_dt_s` — este
+`config.transmitter_type == transmitter_type::MAGNETRON` igual que
+`recover_trip1`, contrato v1.6 — issue #1 ítem 4, antes constante local
+`MAGNETRON_TRANSMITTER`) y `fast_time_dt_s` — este
 último SÍ con respaldo de contrato: se deriva de `config.gate_spacing_m`
 (`2·gate_spacing_m/c`), no de ninguna constante de reloj inventada.
 `crates/service::main` crea/recrea `AfcLoop` en `START` (ganancia vía
@@ -602,7 +604,10 @@ de hueco sin campo propio en el contrato que `ZPHI_A_COEF_DB_PER_DEG`, ver
 más arriba) para no aplicar esta misma lógica en transmisor coherente, donde
 el segundo trip es igual de determinista que el primero y corregir con la
 fase de éste no decorrelaciona nada — ahí sigue aplicando sólo detección y
-marcado. Test de cableo nuevo
+marcado. **Actualización:** esa constante se cerró en contrato v1.6
+(`config.transmitter_type`, issue #1 ítem 4) — el parque es mixto, magnetrón
+y klistrón, y ya no se puede fijar en tiempo de compilación. Test de cableo
+nuevo
 (`ray::tests::range_dealias_recovers_trip2_evidenced_cell_when_burst_is_wired`),
 hermano del ya existente de censura pura; `cargo build`/`cargo test
 --workspace` limpios.
@@ -750,7 +755,8 @@ existente (bit 16, ahora documentado explícitamente como "sólo la vía de fase
 `crates/service/benches/moment_ray.rs`, `crates/contract/tests/layout.rs`, `contract/tests/test_dsp_rcp_codegen.py`).
 En `crates/service::ray` el bloque de detección/marcado cross-radial ahora comprueba explícitamente
 `range_dealias_mode::RANDOM_PHASE` en vez de `!= 0`: un `config` con `SZ_8_64` no entra en ese bloque (no se censura
-ni se recupera nada ahí), porque ese bloque asume la vía de magnetrón (`MAGNETRON_TRANSMITTER` +
+ni se recupera nada ahí), porque ese bloque asume la vía de magnetrón (`MAGNETRON_TRANSMITTER`,
+hoy `config.transmitter_type == transmitter_type::MAGNETRON` desde v1.6 — issue #1 ítem 4, +
 `burst_phase_correct`) y aplicarlo a una instalación SZ(8/64) sería incorrecto, no sólo incompleto. **Lo que esto NO
 hace**: no cablea `crates/sz864::separate_trips` en `crates/service::ray` (ese bloque sigue viendo sólo
 `uz_values`/`v_values`/`cz_values` ya reducidos a momentos, no la serie compleja cruda por pulso que `separate_trips`

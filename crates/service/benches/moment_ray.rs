@@ -102,7 +102,7 @@ fn worst_case_config(n_gates: u16, n_pulses: u16) -> Config {
         antenna_isolation_db: 25.0,
         wavelength_m: 0.10,
         polarization_mode: 0,
-        pad0: 0,
+        transmitter_type: 0,
         burst_window_bins: 0,
     }
 }

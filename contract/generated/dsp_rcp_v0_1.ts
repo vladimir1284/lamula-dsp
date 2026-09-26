@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.5 — lado MMI.
+// Contrato DSP↔RCP v1.6 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 5;
+export const VERSION_MINOR = 6;
 
 const LE = true;
 
@@ -851,8 +851,8 @@ export interface Config {
   wavelengthM: number;
   /** Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único. */
   polarizationMode: number;
-  /** Relleno explícito; vale 0. */
-  pad0: number;
+  /** Tipo de transmisor de esta instalación. Ver la enumeración `transmitter_type`. Reemplaza la constante local `MAGNETRON_TRANSMITTER` de `crates/service::ray` — el parque es mixto, magnetrón y klistrón conviven, así que no se puede fijar en tiempo de compilación. De este campo depende qué vía de recuperación de segundo trip aplica (fase aleatoria frente a SZ(8/64)), si la corrección de fase por burst es obligatoria u opcional, y qué controles puede ofrecer el MMI sin invitar a un error de instalación. Consume el relleno explícito v1.5 (`pad0`), mismo tamaño. */
+  transmitterType: number;
   /** Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst). */
   burstWindowBins: number;
 }
@@ -888,7 +888,7 @@ export const CONFIG_OFFSETS = {
   antennaIsolationDb: 72,
   wavelengthM: 76,
   polarizationMode: 80,
-  pad0: 81,
+  transmitterType: 81,
   burstWindowBins: 82,
 } as const;
 
@@ -922,7 +922,7 @@ export function decodeConfig(view: DataView, base = 0): Config {
     antennaIsolationDb: view.getFloat32(base + 72, LE),
     wavelengthM: view.getFloat32(base + 76, LE),
     polarizationMode: view.getUint8(base + 80),
-    pad0: view.getUint8(base + 81),
+    transmitterType: view.getUint8(base + 81),
     burstWindowBins: view.getUint16(base + 82, LE),
   };
 }
@@ -957,7 +957,7 @@ export function encodeConfig(value: Config, view?: DataView, base = 0): DataView
   dv.setFloat32(base + 72, value.antennaIsolationDb, LE);
   dv.setFloat32(base + 76, value.wavelengthM, LE);
   dv.setUint8(base + 80, value.polarizationMode);
-  dv.setUint8(base + 81, value.pad0);
+  dv.setUint8(base + 81, value.transmitterType);
   dv.setUint16(base + 82, value.burstWindowBins, LE);
   return dv;
 }
@@ -1241,6 +1241,19 @@ export const PolarizationMode = {
   SIMULTANEOUS: 0,
   /** H/V alternante radial a radial. Da LDR; PRF efectiva por canal a la mitad. */
   ALTERNATING: 1,
+} as const;
+
+/**
+ * Tipo de transmisor de la instalación (`docs/algorithms/roadmap.md`
+ * §"Dos ejes de variabilidad del hardware", eje 1). Sólo estos dos valores: el
+ * parque confirmado es magnetrón + klistrón, no hay TWT ni estado sólido
+ * desplegado — añadir uno nuevo cuando exista, no antes.
+ */
+export const TransmitterType = {
+  /** Oscilador libre: fase de pulso aleatoria (recuperación de segundo trip por fase aleatoria), corrección de fase por burst y AFC obligatorios. */
+  MAGNETRON: 0,
+  /** Amplificador coherente con excitador de fase programable pulso a pulso: recuperación de segundo trip por SZ(8/64) (`range_dealias_mode::SZ_8_64`), corrección de fase por burst y AFC opcionales. */
+  KLYSTRON: 1,
 } as const;
 
 /**

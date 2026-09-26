@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.5 — lado DSP.
+// Contrato DSP↔RCP v1.6 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 5;
+pub const VERSION_MINOR: u8 = 6;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -406,8 +406,8 @@ pub struct Config {
     pub wavelength_m: f32,
     /// Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único.
     pub polarization_mode: u8,
-    /// Relleno explícito; vale 0.
-    pub pad0: u8,
+    /// Tipo de transmisor de esta instalación. Ver la enumeración `transmitter_type`. Reemplaza la constante local `MAGNETRON_TRANSMITTER` de `crates/service::ray` — el parque es mixto, magnetrón y klistrón conviven, así que no se puede fijar en tiempo de compilación. De este campo depende qué vía de recuperación de segundo trip aplica (fase aleatoria frente a SZ(8/64)), si la corrección de fase por burst es obligatoria u opcional, y qué controles puede ofrecer el MMI sin invitar a un error de instalación. Consume el relleno explícito v1.5 (`pad0`), mismo tamaño.
+    pub transmitter_type: u8,
     /// Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst).
     pub burst_window_bins: u16,
 }
@@ -626,6 +626,17 @@ pub mod polarization_mode {
     pub const SIMULTANEOUS: u8 = 0;
     /// H/V alternante radial a radial. Da LDR; PRF efectiva por canal a la mitad.
     pub const ALTERNATING: u8 = 1;
+}
+
+/// Tipo de transmisor de la instalación (`docs/algorithms/roadmap.md`
+/// §"Dos ejes de variabilidad del hardware", eje 1). Sólo estos dos valores: el
+/// parque confirmado es magnetrón + klistrón, no hay TWT ni estado sólido
+/// desplegado — añadir uno nuevo cuando exista, no antes.
+pub mod transmitter_type {
+    /// Oscilador libre: fase de pulso aleatoria (recuperación de segundo trip por fase aleatoria), corrección de fase por burst y AFC obligatorios.
+    pub const MAGNETRON: u8 = 0;
+    /// Amplificador coherente con excitador de fase programable pulso a pulso: recuperación de segundo trip por SZ(8/64) (`range_dealias_mode::SZ_8_64`), corrección de fase por burst y AFC opcionales.
+    pub const KLYSTRON: u8 = 1;
 }
 
 /// Estimadores de momentos.

@@ -163,8 +163,9 @@
 //! instalación de magnetrón con burst wireado YA traen el valor recuperado
 //! en `uz_values`/`v_values`/`cz_values` cuando llegan a este bloque: no
 //! hay nada que recuperar aparte, sólo decidir no censurarlas. La distinción
-//! magnetrón/coherente vive en la constante local `MAGNETRON_TRANSMITTER`,
-//! mismo tipo de hueco que `ZPHI_A_KDP_S_BAND`, porque en transmisor
+//! magnetrón/coherente vive en `config.transmitter_type` (contrato v1.6,
+//! issue #1 ítem 4 — antes constante local `MAGNETRON_TRANSMITTER`, mismo
+//! tipo de hueco que sigue siendo `ZPHI_A_KDP_S_BAND`), porque en transmisor
 //! coherente el segundo trip es igual de determinista que el primero y
 //! corregir con la fase de éste no decorrelaciona nada — ahí sigue aplicando
 //! sólo detección y marcado. `range_dealias_mode::SZ_8_64` (v0.3 del
@@ -198,7 +199,8 @@ use lamula_clutter::{gmap_filter, moments_from_spectrum, notch_filter};
 use lamula_contract::drx_dsp::channel;
 use lamula_contract::dsp_rcp::{
     clutter_filter, data_type, dealias_mode, estimator, moment_flag, moment_kind,
-    polarization_mode, range_dealias_mode, ray_flag, Config, MomentField, MomentRay, SpectrumFrame,
+    polarization_mode, range_dealias_mode, ray_flag, transmitter_type, Config, MomentField,
+    MomentRay, SpectrumFrame,
 };
 use lamula_dual_prf::{continuity_fix, dealias_dual_prf};
 use lamula_ingest::{ssi_counts_to_deg, AssembledRadial};
@@ -286,22 +288,6 @@ const ZPHI_A_AZ_S_BAND: f64 = 9.28e-8; // Tabla 1a
 const ZPHI_BETA_KDP_S_BAND: f64 = 1.18; // Tabla 1c
 const ZPHI_A_KDP_S_BAND: f64 = 1.31e3; // Tabla 1c
 
-/// Tipo de transmisor de la instalación (`docs/algorithms/roadmap.md`
-/// §"Decisiones cerradas" ítem "`range_dealias` sin SZ"): `true` = magnetrón
-/// (oscilador libre, fase de burst aleatoria pulso a pulso), `false` =
-/// transmisor coherente (klistrón/TWT/estado sólido). Decide si una celda
-/// con evidencia de segundo trip (ver `range_dealias_detected` en
-/// [`build_moment_ray`]) puede recuperarse o sólo detectarse y marcarse: en
-/// magnetrón la fase del segundo trip es independiente de la del primero, y
-/// corregir con la fase de burst del primero (ya cableado en
-/// [`burst_phase_correct`]) la blanquea a ruido — recuperación real; en
-/// coherente el segundo trip es igual de determinista que el primero y esa
-/// misma corrección no decorrelaciona nada, sólo censura tiene sentido. El
-/// contrato no tiene campo de hardware con que decidir esto (mismo tipo de
-/// hueco que `ZPHI_A_KDP_S_BAND`): constante local de instalación hasta
-/// que exista uno.
-const MAGNETRON_TRANSMITTER: bool = true;
-
 /// Muestra de burst del pulso 0 de este radial (canal
 /// `channel::TX_BURST_0`), para alimentar
 /// [`lamula_burst::AfcLoop::update`](lamula_burst::AfcLoop) una vez por
@@ -311,11 +297,11 @@ const MAGNETRON_TRANSMITTER: bool = true;
 /// del mismo radial. `None` en las mismas condiciones que
 /// [`burst_phase_correct`] (`config.burst_window_bins == 0` o sin canal de
 /// burst en este radial) y, además, en transmisor coherente
-/// (`MAGNETRON_TRANSMITTER == false`): ahí el AFC se degrada a un ajuste
-/// lento o desaparece según la página del algoritmo, y este cableo inicial
-/// no cubre ese caso.
+/// (`config.transmitter_type != transmitter_type::MAGNETRON`): ahí el AFC se
+/// degrada a un ajuste lento o desaparece según la página del algoritmo, y
+/// este cableo inicial no cubre ese caso.
 pub fn afc_burst_sample(radial: &AssembledRadial, config: &Config) -> Option<Vec<Complex64>> {
-    if !MAGNETRON_TRANSMITTER || config.burst_window_bins == 0 {
+    if config.transmitter_type != transmitter_type::MAGNETRON || config.burst_window_bins == 0 {
         return None;
     }
     radial.burst_window(channel::TX_BURST_0, 0, config.burst_window_bins as usize)
@@ -1224,12 +1210,14 @@ pub fn build_moment_ray(
     // hay curva de aceptación frente a SNR contrastada para este criterio;
     // el oráculo sólo la da para su modelo de blanco puntual.
     //
-    // `can_recover_trip1`: en magnetrón (`MAGNETRON_TRANSMITTER`) con burst
-    // wireado (`burst_corrected.is_some()`), `uz_values`/`v_values`/
-    // `cz_values` en esta celda YA son el valor recuperado — ver el
-    // doc-comment del módulo. Sin las dos condiciones, no hay recuperación
-    // posible y se mantiene sólo detección y marcado.
-    let can_recover_trip1 = MAGNETRON_TRANSMITTER && burst_corrected.is_some();
+    // `can_recover_trip1`: en magnetrón (`config.transmitter_type ==
+    // transmitter_type::MAGNETRON`) con burst wireado
+    // (`burst_corrected.is_some()`), `uz_values`/`v_values`/`cz_values` en
+    // esta celda YA son el valor recuperado — ver el doc-comment del
+    // módulo. Sin las dos condiciones, no hay recuperación posible y se
+    // mantiene sólo detección y marcado.
+    let can_recover_trip1 =
+        config.transmitter_type == transmitter_type::MAGNETRON && burst_corrected.is_some();
     let mut range_dealias_detected = false;
     if config.range_dealias_mode == range_dealias_mode::RANDOM_PHASE {
         let range_dealias_role: Option<bool> = match previous_prf {
@@ -1756,7 +1744,7 @@ mod tests {
             antenna_isolation_db: 0.0,
             wavelength_m: 0.10,
             polarization_mode: 0,
-            pad0: 0,
+            transmitter_type: transmitter_type::MAGNETRON,
             burst_window_bins: 0,
         }
     }
@@ -2392,6 +2380,42 @@ mod tests {
             sample,
             vec![Complex64::new(1.0, 0.0), Complex64::new(2.0, 0.0)]
         );
+    }
+
+    #[test]
+    fn afc_burst_sample_is_none_on_klystron_even_with_burst_window_configured() {
+        // Mismo radial que `afc_burst_sample_reads_pulse_zero_of_the_burst_channel`
+        // (burst wireado, `burst_window_bins > 0`), pero `transmitter_type::KLYSTRON`:
+        // el AFC no se degrada solo con datos, la página del algoritmo lo declara
+        // fuera de alcance para transmisor coherente — ver el doc-comment de
+        // `afc_burst_sample`.
+        let burst_ch = vec![
+            vec![Complex64::new(1.0, 0.0)],
+            vec![Complex64::new(2.0, 0.0)],
+            vec![Complex64::new(3.0, 0.0)],
+        ];
+        let radial = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 1,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: channel::RX_0 | channel::TX_BURST_0,
+            channels: vec![vec![vec![Complex64::new(9.0, 9.0)]], burst_ch],
+            ray_flags: vec![0],
+            dropped_pulses: 0,
+        };
+        let config = Config {
+            burst_window_bins: 2,
+            transmitter_type: transmitter_type::KLYSTRON,
+            ..config_with_thresholds(3.0, 0.0, -100.0)
+        };
+
+        assert_eq!(afc_burst_sample(&radial, &config), None);
     }
 
     #[test]
@@ -3046,7 +3070,7 @@ mod tests {
         // Mismo escenario que `range_dealias_detection_censors_only_trip2_evidenced_cells`
         // (celda 1: sin eco en trip1, con eco en trip2), pero con
         // `burst_window_bins` > 0 y canal de burst presente en el radial de
-        // PRF alta: `can_recover_trip1` (`MAGNETRON_TRANSMITTER` +
+        // PRF alta: `can_recover_trip1` (`transmitter_type::MAGNETRON` +
         // `burst_corrected.is_some()`) debería dejar la celda sin censurar
         // — ya trae el valor corregido por `burst_phase_correct` antes de
         // llegar a este bloque, ver el doc-comment del módulo. Fase de
@@ -3187,6 +3211,136 @@ mod tests {
         // la celda 3 (sin eco propio en ninguna hipótesis) se censura por
         // `sig_threshold`/`log_threshold` de `gate_quality`, ajeno por
         // completo a la recuperación de trip2 que este test ejercita.
+    }
+
+    #[test]
+    fn range_dealias_still_censors_trip2_evidenced_cell_on_klystron_even_with_burst_wired() {
+        // Mismo escenario exacto que
+        // `range_dealias_recovers_trip2_evidenced_cell_when_burst_is_wired`
+        // (burst wireado, `burst_window_bins > 0`), pero
+        // `transmitter_type::KLYSTRON`: `can_recover_trip1` exige magnetrón,
+        // así que la celda con evidencia de trip2 debe seguir censurándose,
+        // igual que sin burst — la recuperación por fase de burst asume
+        // fase de pulso aleatoria (magnetrón), que en klistrón no aplica.
+        let mut config = dual_prf_config();
+        config.dealias_mode = dealias_mode::NONE;
+        config.range_dealias_mode = range_dealias_mode::RANDOM_PHASE;
+        config.moment_mask = 1 << moment_kind::UZ;
+        config.burst_window_bins = 1;
+        config.transmitter_type = transmitter_type::KLYSTRON;
+
+        let (_, prt_high, ..) = dual_prf_split(&config);
+        let r_max_high_m = SPEED_OF_LIGHT_M_S * prt_high / 2.0;
+        config.gate_spacing_m = (r_max_high_m / 3.0) as f32; // fold_gates = 3
+
+        let echo = CellParams {
+            power_s: 1.0,
+            mean_v: 0.0,
+            sigma_v: 1.0,
+            wavelength_m: 0.10,
+            prt_s: 1.2e-3,
+            m: 64,
+            noise_floor: 0.01,
+        };
+        let noise = CellParams {
+            power_s: 0.0,
+            ..echo
+        };
+
+        let mut rng = StdRng::seed_from_u64(20260902);
+
+        let low_cells = [
+            CellParams {
+                prt_s: 1.2e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 1.2e-3,
+                ..noise
+            },
+        ];
+        let low_channel = generate_channel(&low_cells, &mut rng);
+        let mut radial_low = radial_from_channels(vec![low_channel]);
+        radial_low.prf_div = 3;
+
+        let high_cells = [
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..echo
+            },
+            CellParams {
+                prt_s: 0.8e-3,
+                ..noise
+            },
+        ];
+        let high_channel = generate_channel(&high_cells, &mut rng);
+        let n_pulses = high_channel[0].len();
+        let burst_channel = vec![vec![Complex64::new(10.0, 0.0); n_pulses]];
+        let mut radial_high = AssembledRadial {
+            seq_start: 1,
+            timestamp_ns_start: 0,
+            trigger_count_start: 0,
+            azimuth_raw: 0,
+            elevation_raw: 0,
+            prf_div: 2,
+            pulse_width_idx: 0,
+            pulse_mode: 0,
+            cell_mode: 0,
+            channel_mask: channel::RX_0 | channel::TX_BURST_0,
+            channels: vec![high_channel, burst_channel],
+            ray_flags: vec![0; n_pulses],
+            dropped_pulses: 0,
+        };
+        radial_high.prf_div = 2;
+
+        let (_, previous_prf) =
+            build_moment_ray(&radial_low, &config, 1, false, 1_000_000, 0.0, None);
+        let (msg, _) = build_moment_ray(
+            &radial_high,
+            &config,
+            2,
+            false,
+            1_000_000,
+            0.0,
+            Some(&previous_prf),
+        );
+        let UpMessage::MomentRay { moments, .. } = msg else {
+            panic!("se esperaba MomentRay");
+        };
+        let uz = &moments
+            .iter()
+            .find(|m| m.field.kind == moment_kind::UZ)
+            .expect("falta el bloque de UZ")
+            .values;
+
+        assert!(
+            uz[1].is_nan(),
+            "celda 1: evidencia de trip2 en klistrón con burst wireado debería seguir censurándose"
+        );
     }
 
     #[test]

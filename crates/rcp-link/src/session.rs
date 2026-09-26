@@ -164,7 +164,7 @@ mod tests {
             antenna_isolation_db: 0.0,
             wavelength_m: 0.1,
             polarization_mode: 0,
-            pad0: 0,
+            transmitter_type: 0,
             burst_window_bins: 0,
         }
     }

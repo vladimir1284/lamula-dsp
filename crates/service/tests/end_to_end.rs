@@ -81,7 +81,7 @@ fn build_config_frame(cfg: &Config) -> Vec<u8> {
     buf.extend_from_slice(&cfg.antenna_isolation_db.to_le_bytes());
     buf.extend_from_slice(&cfg.wavelength_m.to_le_bytes());
     buf.push(cfg.polarization_mode);
-    buf.push(cfg.pad0);
+    buf.push(cfg.transmitter_type);
     buf.extend_from_slice(&cfg.burst_window_bins.to_le_bytes());
     buf
 }
@@ -174,7 +174,7 @@ async fn service_binary_wires_drx_to_rcp() {
         antenna_isolation_db: 0.0,
         wavelength_m: 0.10,
         polarization_mode: 0,
-        pad0: 0,
+        transmitter_type: 0,
         burst_window_bins: 0,
     };
     rcp.write_all(&build_config_frame(&config)).await.unwrap();

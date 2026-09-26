@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 5
+version_minor = 6
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -328,7 +328,7 @@ fields = [
   { name = "antenna_isolation_db", type = "f32", doc = "Aislamiento cruzado de la antena, dB. Satura ldr_db (lamula_polarimetry::ldr_db); sin efecto salvo LDR." },
   { name = "wavelength_m", type = "f32", doc = "Longitud de onda, metros. Escala la velocidad." },
   { name = "polarization_mode", type = "u8", doc = "Modo del segundo canal de recepción cuando n_rx_channels > 1. Ver la enumeración. Sin efecto con canal único." },
-  { name = "pad0", type = "u8", doc = "Relleno explícito; vale 0." },
+  { name = "transmitter_type", type = "u8", doc = "Tipo de transmisor de esta instalación. Ver la enumeración `transmitter_type`. Reemplaza la constante local `MAGNETRON_TRANSMITTER` de `crates/service::ray` — el parque es mixto, magnetrón y klistrón conviven, así que no se puede fijar en tiempo de compilación. De este campo depende qué vía de recuperación de segundo trip aplica (fase aleatoria frente a SZ(8/64)), si la corrección de fase por burst es obligatoria u opcional, y qué controles puede ofrecer el MMI sin invitar a un error de instalación. Consume el relleno explícito v1.5 (`pad0`), mismo tamaño." },
   { name = "burst_window_bins", type = "u16", doc = "Bins iniciales de un canal de burst (drx_dsp::channel::TX_BURST_0/1) que llevan señal real; el resto del canal es ruido/silencio. 0 si la instalación no tiene canal de burst (transmisor coherente sin monitor de burst)." },
 ]
 
@@ -511,6 +511,18 @@ doc = """Modo del segundo canal de recepción, cuando `n_rx_channels > 1`
 values = [
   { name = "simultaneous", value = 0, doc = "STAR: H y V transmitidos y recibidos a la vez. Da ZDR/ΦDP/KDP/ρHV; no LDR." },
   { name = "alternating", value = 1, doc = "H/V alternante radial a radial. Da LDR; PRF efectiva por canal a la mitad." },
+]
+
+[[enum]]
+name = "transmitter_type"
+type = "u8"
+doc = """Tipo de transmisor de la instalación (`docs/algorithms/roadmap.md`
+§"Dos ejes de variabilidad del hardware", eje 1). Sólo estos dos valores: el
+parque confirmado es magnetrón + klistrón, no hay TWT ni estado sólido
+desplegado — añadir uno nuevo cuando exista, no antes."""
+values = [
+  { name = "magnetron", value = 0, doc = "Oscilador libre: fase de pulso aleatoria (recuperación de segundo trip por fase aleatoria), corrección de fase por burst y AFC obligatorios." },
+  { name = "klystron", value = 1, doc = "Amplificador coherente con excitador de fase programable pulso a pulso: recuperación de segundo trip por SZ(8/64) (`range_dealias_mode::SZ_8_64`), corrección de fase por burst y AFC opcionales." },
 ]
 
 [[enum]]
