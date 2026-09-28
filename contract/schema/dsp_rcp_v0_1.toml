@@ -46,7 +46,7 @@
 [meta]
 name = "dsp_rcp"
 version_major = 1
-version_minor = 8
+version_minor = 9
 magic = 0x4C4D4453  # "LMDS" en ASCII, little-endian
 endianness = "little"
 
@@ -368,6 +368,23 @@ doc = "Arranca el autotest de enlace. Obligatorio en cada reconexión del RCP."
 fields = [
   { name = "seq", type = "u32", doc = "Se devuelve tal cual en el selftest_result." },
   { name = "nonce", type = "u32", doc = "Valor arbitrario que el DSP devuelve, para casar respuesta con petición." },
+]
+
+[[message]]
+name = "request_spectrum"
+type_id = 11
+dir = "down"
+doc = """Pide una traza de espectro de FI (spectrum_frame) con canal y
+promediado elegidos (issue #1 ítem 7, mapeo RCP entrada 6). Alternativa
+parametrizada a `command::request_spectrum` (control, sin parámetros), que
+sigue existiendo tal cual con su comportamiento de hoy: canal RX_0, un
+periodograma por mandato, sin promediar entre mandatos sucesivos."""
+
+fields = [
+  { name = "seq", type = "u32", doc = "Se devuelve como spectrum_frame.seq." },
+  { name = "channel", type = "u8", doc = "Canal físico a muestrear — bit único de drx_dsp::channel (RX_0/RX_1/RX_2/RX_3/TX_BURST_0). Sin ese canal en el radial vigente, no hay traza que mandar, igual que hoy con RX_0 fijo." },
+  { name = "n_averages", type = "u8", doc = "Radiales sucesivos de ese canal a acumular en potencia (nunca en dB, ver docs/algorithms/analizador-espectro-fi.md) antes de responder con un único spectrum_frame. 0 o 1: un solo radial, mismo comportamiento que command::request_spectrum. Más promedios reduce el ruido de la traza a costa de la latencia de refresco." },
+  { name = "pad0", type = "u16", doc = "Relleno explícito; vale 0." },
 ]
 
 # ---------------------------------------------------------------------------

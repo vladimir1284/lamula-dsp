@@ -755,6 +755,12 @@ fn sz864_decode_trip1(radial: &AssembledRadial, config: &Config) -> Option<Assem
 /// Devuelve `None` si el radial no trae el canal `RX_0`, o si no tiene
 /// celdas o pulsos con que formar ni una sola captura — sin ráfaga en curso
 /// no hay traza que mandar (`crate::session`, mandato `request_spectrum`).
+/// Envoltorio fino sobre [`spectrum_capture_rows`] +
+/// [`spectrum_frame_from_captures`] fijado al canal `RX_0` y a un solo
+/// radial — el camino de `command::request_spectrum` (control, sin
+/// parámetros). El mandato parametrizado `request_spectrum` (issue #1 ítem
+/// 7, mapeo RCP entrada 6) usa las dos piezas por separado para elegir
+/// canal y acumular varios radiales — ver `crate::main`.
 ///
 /// `span_hz` (issue #1 ítem 6, mapeo RCP entrada 3) es la anchura de Nyquist
 /// de la FFT que arma esta captura: las muestras de una captura están
@@ -777,26 +783,68 @@ pub fn build_spectrum_frame(
     seq: u32,
     rx_if_hz: f64,
 ) -> Option<UpMessage> {
-    let idx = radial.channel_index(channel::RX_0)?;
+    let captures = spectrum_capture_rows(radial, channel::RX_0)?;
+    spectrum_frame_from_captures(
+        &captures,
+        config,
+        seq,
+        channel::RX_0,
+        radial.timestamp_ns_start,
+        rx_if_hz,
+    )
+}
+
+/// Extrae las capturas de tiempo rápido de `channel` de un radial: una fila
+/// por pulso, cada una las `n_bins` celdas de rango de ese pulso — al revés
+/// que `channels[c][bin]`, que es la serie pulso a pulso (dominio Doppler)
+/// que usa el resto de este módulo. `None` si el radial no trae `channel`,
+/// o si no tiene celdas o pulsos con que formar ni una sola fila.
+pub fn spectrum_capture_rows(radial: &AssembledRadial, channel: u8) -> Option<Vec<Vec<Complex64>>> {
+    let idx = radial.channel_index(channel)?;
     let ch = &radial.channels[idx];
     let n_bins = ch.len();
     let n_pulses = ch.first().map_or(0, Vec::len);
     if n_bins == 0 || n_pulses == 0 {
         return None;
     }
+    Some(
+        (0..n_pulses)
+            .map(|p| (0..n_bins).map(|b| ch[b][p]).collect())
+            .collect(),
+    )
+}
 
-    let captures: Vec<Vec<Complex64>> = (0..n_pulses)
-        .map(|p| (0..n_bins).map(|b| ch[b][p]).collect())
-        .collect();
+/// Arma el `spectrum_frame` a partir de capturas ya extraídas
+/// ([`spectrum_capture_rows`]), de uno o de varios radiales concatenados —
+/// [`welch_trace_dbm`] promedia en potencia sobre todas las filas que le
+/// lleguen, sea cual sea su procedencia, así que promediar entre radiales
+/// (issue #1 ítem 7) es sólo concatenar más filas antes de llamarlo, sin
+/// tocar su matemática. `None` si `captures` está vacío o su primera fila
+/// no tiene celdas. Todas las filas tienen que traer el mismo número de
+/// celdas — invariante que sostiene `Session::apply_config` al rechazar un
+/// `config` nuevo mientras la sesión está en marcha (`not_in_setup_phase`):
+/// `gate_spacing_m`/`n_gates` no pueden cambiar a mitad de una acumulación.
+pub fn spectrum_frame_from_captures(
+    captures: &[Vec<Complex64>],
+    config: &Config,
+    seq: u32,
+    channel: u8,
+    capture_time_utc_ns: u64,
+    rx_if_hz: f64,
+) -> Option<UpMessage> {
+    let n_bins = captures.first()?.len();
+    if n_bins == 0 {
+        return None;
+    }
     let win = welch_hann_window(n_bins);
-    let bins_db = welch_trace_dbm(&captures, &win, config.receiver_gain_db as f64);
+    let bins_db = welch_trace_dbm(captures, &win, config.receiver_gain_db as f64);
     let span_hz = 1.0 / fast_time_dt_s(config);
 
     let frame = SpectrumFrame {
         seq,
-        capture_time_utc_ns: radial.timestamp_ns_start,
+        capture_time_utc_ns,
         n_bins: n_bins as u16,
-        channel: channel::RX_0,
+        channel,
         flags: 0,
         center_freq_hz: rx_if_hz as f32,
         span_hz: span_hz as f32,
@@ -807,6 +855,72 @@ pub fn build_spectrum_frame(
         frame,
         bins_db: bins_db.into_iter().map(|v| v as f32).collect(),
     })
+}
+
+/// Estado de una acumulación de espectro en curso entre varios radiales
+/// (issue #1 ítem 7, mandato `request_spectrum` con `n_averages > 1`).
+/// Vive en `crate::main`, mismo ciclo de vida que `assembler`/`afc_loop`:
+/// se descarta en `STOP`/`ENTER_SETUP` (acumular a través de un corte de
+/// sesión no tiene sentido físico) y una petición nueva reemplaza
+/// cualquiera en curso, sin cola de reintento — mismo criterio "la última
+/// gana" que `IngestSource::afc`.
+pub struct PendingSpectrum {
+    seq: u32,
+    channel: u8,
+    wanted: u8,
+    radials_seen: u8,
+    captures: Vec<Vec<Complex64>>,
+}
+
+impl PendingSpectrum {
+    /// `wanted` se satura a 1 como mínimo: `crate::main` sólo construye
+    /// esto para `n_averages > 1`, pero un 0 aquí no debería colgarse
+    /// esperando para siempre.
+    pub fn new(seq: u32, channel: u8, wanted: u8) -> Self {
+        Self {
+            seq,
+            channel,
+            wanted: wanted.max(1),
+            radials_seen: 0,
+            captures: Vec::new(),
+        }
+    }
+
+    /// Añade las filas de `radial` para `self.channel`, si las trae. Un
+    /// radial sin ese canal se ignora — se sigue esperando el próximo, no
+    /// se aborta la acumulación por un solo radial de paso sin ese dato
+    /// (por ejemplo, mientras `burst_window_bins == 0` en un canal de
+    /// burst que se activa más adelante en la misma sesión).
+    pub fn feed(&mut self, radial: &AssembledRadial) {
+        if let Some(mut rows) = spectrum_capture_rows(radial, self.channel) {
+            self.captures.append(&mut rows);
+            self.radials_seen += 1;
+        }
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.radials_seen >= self.wanted
+    }
+
+    /// Arma el `spectrum_frame` final sobre todas las filas acumuladas.
+    /// `capture_time_utc_ns` es del radial que completó la cuenta, no del
+    /// primero: marca cuándo la traza quedó lista, no cuándo empezó a
+    /// acumularse.
+    pub fn finish(
+        self,
+        config: &Config,
+        rx_if_hz: f64,
+        capture_time_utc_ns: u64,
+    ) -> Option<UpMessage> {
+        spectrum_frame_from_captures(
+            &self.captures,
+            config,
+            self.seq,
+            self.channel,
+            capture_time_utc_ns,
+            rx_if_hz,
+        )
+    }
 }
 
 /// Ciclos de `fs_hz` que corresponden a `us` microsegundos, redondeado al

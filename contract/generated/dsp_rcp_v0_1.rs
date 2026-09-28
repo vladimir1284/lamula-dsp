@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.8 — lado DSP.
+// Contrato DSP↔RCP v1.9 — lado DSP.
 //
 // Little-endian, empaquetado. Los asertos de tamaño y desplazamiento
 // viven en `contract/tests/dsp_rcp_layout.rs`; aquí van las constantes
@@ -11,7 +11,7 @@
 
 pub const MAGIC: u32 = 0x4C4D4453;
 pub const VERSION_MAJOR: u8 = 1;
-pub const VERSION_MINOR: u8 = 8;
+pub const VERSION_MINOR: u8 = 9;
 
 /// Cabecera común a todo mensaje.
 #[repr(C, packed)]
@@ -62,6 +62,8 @@ pub enum MsgType {
     Control = 9,
     /// down
     SelftestRequest = 10,
+    /// down
+    RequestSpectrum = 11,
 }
 
 /// Un radial de momentos: la observación autoritativa que el RCP archiva
@@ -466,6 +468,25 @@ pub struct SelftestRequest {
     pub nonce: u32,
 }
 pub const SELFTEST_REQUEST_SIZE: usize = 8;
+
+/// Pide una traza de espectro de FI (spectrum_frame) con canal y
+/// promediado elegidos (issue #1 ítem 7, mapeo RCP entrada 6). Alternativa
+/// parametrizada a `command::request_spectrum` (control, sin parámetros), que
+/// sigue existiendo tal cual con su comportamiento de hoy: canal RX_0, un
+/// periodograma por mandato, sin promediar entre mandatos sucesivos.
+#[repr(C, packed)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct RequestSpectrum {
+    /// Se devuelve como spectrum_frame.seq.
+    pub seq: u32,
+    /// Canal físico a muestrear — bit único de drx_dsp::channel (RX_0/RX_1/RX_2/RX_3/TX_BURST_0). Sin ese canal en el radial vigente, no hay traza que mandar, igual que hoy con RX_0 fijo.
+    pub channel: u8,
+    /// Radiales sucesivos de ese canal a acumular en potencia (nunca en dB, ver docs/algorithms/analizador-espectro-fi.md) antes de responder con un único spectrum_frame. 0 o 1: un solo radial, mismo comportamiento que command::request_spectrum. Más promedios reduce el ruido de la traza a costa de la latencia de refresco.
+    pub n_averages: u8,
+    /// Relleno explícito; vale 0.
+    pub pad0: u16,
+}
+pub const REQUEST_SPECTRUM_SIZE: usize = 8;
 
 /// Códigos de rechazo del plano de control.
 pub mod error {

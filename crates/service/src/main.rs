@@ -240,6 +240,12 @@ async fn main() {
     // modo dedicado.
     let mut last_radial: Option<lamula_ingest::AssembledRadial> = None;
     let mut spectrum_seq: u32 = 0;
+    // Acumulación de espectro en curso (issue #1 ítem 7, mandato
+    // `request_spectrum` parametrizado con `n_averages > 1`): mismo ciclo
+    // de vida que `assembler`/`afc_loop`, se descarta en `STOP`/
+    // `ENTER_SETUP` — acumular a través de un corte de sesión no tiene
+    // sentido físico. Ver el doc-comment de `ray::PendingSpectrum`.
+    let mut pending_spectrum: Option<ray::PendingSpectrum> = None;
 
     loop {
         tokio::select! {
@@ -290,6 +296,18 @@ async fn main() {
                                     .await;
                             }
                         }
+                        if let Some(pending) = pending_spectrum.as_mut() {
+                            pending.feed(&radial);
+                            if pending.is_complete() {
+                                if let Some(finished) = pending_spectrum.take() {
+                                    if let Some(spectrum_msg) =
+                                        finished.finish(cfg_snapshot, cfg.rx_if_hz, radial.timestamp_ns_start)
+                                    {
+                                        let _ = up.send(spectrum_msg).await;
+                                    }
+                                }
+                            }
+                        }
                         last_radial = Some(radial);
                         if up.send(msg).await.is_err() {
                             println!("RCP no admite más momentos (up cerrado)");
@@ -323,6 +341,7 @@ async fn main() {
                     start,
                     &last_radial,
                     &mut spectrum_seq,
+                    &mut pending_spectrum,
                 )
                 .await;
             }
@@ -362,6 +381,7 @@ async fn handle_down_message(
     start: tokio::time::Instant,
     last_radial: &Option<lamula_ingest::AssembledRadial>,
     spectrum_seq: &mut u32,
+    pending_spectrum: &mut Option<ray::PendingSpectrum>,
 ) {
     match msg {
         DownMessage::Config(down_config) => {
@@ -432,6 +452,7 @@ async fn handle_down_message(
                     *previous_prf = None;
                     *afc_loop = None;
                     *last_afc = None;
+                    *pending_spectrum = None;
                 }
                 command::REQUEST_STATUS => {
                     let status = build_status(session, counters, start, last_afc);
@@ -461,6 +482,39 @@ async fn handle_down_message(
                     }
                 }
                 _ => {}
+            }
+        }
+        DownMessage::RequestSpectrum(req) => {
+            // Mandato parametrizado (issue #1 ítem 7, mapeo RCP entrada 6):
+            // canal a elección, y promediado entre varios radiales cuando
+            // `n_averages > 1` — ver el doc-comment de `ray::PendingSpectrum`.
+            // `n_averages <= 1` es el mismo camino oportunista de un solo
+            // radial que ya tenía `command::REQUEST_SPECTRUM`, sólo que con
+            // el canal que pida `req.channel` en vez de `RX_0` fijo. Una
+            // petición nueva reemplaza cualquier acumulación en curso, sin
+            // cola — mismo criterio "la última gana" que `IngestSource::afc`.
+            if req.n_averages <= 1 {
+                if let (Some(radial), Some(cfg_snapshot)) = (last_radial, session.config()) {
+                    if let Some(captures) = ray::spectrum_capture_rows(radial, req.channel) {
+                        if let Some(msg) = ray::spectrum_frame_from_captures(
+                            &captures,
+                            cfg_snapshot,
+                            req.seq,
+                            req.channel,
+                            radial.timestamp_ns_start,
+                            svc_cfg.rx_if_hz,
+                        ) {
+                            let _ = up.send(msg).await;
+                        }
+                    }
+                }
+                *pending_spectrum = None;
+            } else {
+                *pending_spectrum = Some(ray::PendingSpectrum::new(
+                    req.seq,
+                    req.channel,
+                    req.n_averages,
+                ));
             }
         }
         DownMessage::SelftestRequest(req) => {

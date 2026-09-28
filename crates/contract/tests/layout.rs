@@ -131,7 +131,7 @@ fn drx_afc() {
 fn dsp_identidad() {
     assert_eq!(dsp_rcp::MAGIC, 0x4C4D_4453, "magic no es \"LMDS\"");
     assert_eq!(dsp_rcp::VERSION_MAJOR, 1);
-    assert_eq!(dsp_rcp::VERSION_MINOR, 8);
+    assert_eq!(dsp_rcp::VERSION_MINOR, 9);
 }
 
 /// Los dos contratos comparten forma y tamaño de cabecera a propósito, para que
@@ -159,6 +159,7 @@ fn dsp_tipos_de_mensaje() {
     assert_eq!(dsp_rcp::MsgType::Config as u8, 8);
     assert_eq!(dsp_rcp::MsgType::Control as u8, 9);
     assert_eq!(dsp_rcp::MsgType::SelftestRequest as u8, 10);
+    assert_eq!(dsp_rcp::MsgType::RequestSpectrum as u8, 11);
 }
 
 #[test]
@@ -289,6 +290,15 @@ fn dsp_config() {
 fn dsp_control() {
     check_layout!(dsp_rcp::Control, 8, seq: 4, command: 1, pad0: 1, pad1: 2);
     assert_eq!(dsp_rcp::CONTROL_SIZE, 8);
+}
+
+#[test]
+fn dsp_request_spectrum() {
+    check_layout!(
+        dsp_rcp::RequestSpectrum, 8,
+        seq: 4, channel: 1, n_averages: 1, pad0: 2,
+    );
+    assert_eq!(dsp_rcp::REQUEST_SPECTRUM_SIZE, 8);
 }
 
 /// La máscara de momentos es un `u32` con un bit por momento, así que el

@@ -10,10 +10,10 @@
 
 use lamula_contract::dsp_rcp::{
     BiteEvent, Capabilities, Config, ConfigAck, Control, MomentField, MomentRay, MsgType,
-    SelftestRequest, SelftestResult, SpectrumFrame, Status, BITE_EVENT_SIZE, CAPABILITIES_SIZE,
-    CONFIG_ACK_SIZE, CONFIG_SIZE, CONTROL_SIZE, HEADER_SIZE, MAGIC, MOMENT_FIELD_SIZE,
-    MOMENT_RAY_SIZE, SELFTEST_REQUEST_SIZE, SELFTEST_RESULT_SIZE, SPECTRUM_FRAME_SIZE, STATUS_SIZE,
-    VERSION_MAJOR, VERSION_MINOR,
+    RequestSpectrum, SelftestRequest, SelftestResult, SpectrumFrame, Status, BITE_EVENT_SIZE,
+    CAPABILITIES_SIZE, CONFIG_ACK_SIZE, CONFIG_SIZE, CONTROL_SIZE, HEADER_SIZE, MAGIC,
+    MOMENT_FIELD_SIZE, MOMENT_RAY_SIZE, REQUEST_SPECTRUM_SIZE, SELFTEST_REQUEST_SIZE,
+    SELFTEST_RESULT_SIZE, SPECTRUM_FRAME_SIZE, STATUS_SIZE, VERSION_MAJOR, VERSION_MINOR,
 };
 
 use crate::error::RcpLinkError;
@@ -54,6 +54,7 @@ pub enum DownMessage {
     Config(Config),
     Control(Control),
     SelftestRequest(SelftestRequest),
+    RequestSpectrum(RequestSpectrum),
 }
 
 /// Posición del byte de banderas dentro de la cabecera común: `magic` (4) +
@@ -356,9 +357,9 @@ fn parse_common_header(frame: &[u8]) -> Result<(u8, usize), RcpLinkError> {
 }
 
 /// Decodifica una trama `down` completa (cabecera de 12 B + `payload_len`
-/// bytes, tal como los entrega `crate::tcp`). Sólo cubre `config`, `control`
-/// y `selftest_request`: son los únicos tres mensajes de sentido `down` del
-/// contrato.
+/// bytes, tal como los entrega `crate::tcp`). Cubre `config`, `control`,
+/// `selftest_request` y `request_spectrum`: son los únicos cuatro mensajes
+/// de sentido `down` del contrato.
 pub fn decode_down_frame(frame: &[u8]) -> Result<DownMessage, RcpLinkError> {
     let (msg_type, payload_len) = parse_common_header(frame)?;
     if frame.len() != HEADER_SIZE + payload_len {
@@ -372,6 +373,10 @@ pub fn decode_down_frame(frame: &[u8]) -> Result<DownMessage, RcpLinkError> {
         Ok(DownMessage::Control(decode_control_body(body)?))
     } else if msg_type == MsgType::SelftestRequest as u8 {
         Ok(DownMessage::SelftestRequest(decode_selftest_request_body(
+            body,
+        )?))
+    } else if msg_type == MsgType::RequestSpectrum as u8 {
+        Ok(DownMessage::RequestSpectrum(decode_request_spectrum_body(
             body,
         )?))
     } else {
@@ -447,5 +452,17 @@ fn decode_selftest_request_body(body: &[u8]) -> Result<SelftestRequest, RcpLinkE
     Ok(SelftestRequest {
         seq: u32::from_le_bytes(body[0..4].try_into().unwrap()),
         nonce: u32::from_le_bytes(body[4..8].try_into().unwrap()),
+    })
+}
+
+fn decode_request_spectrum_body(body: &[u8]) -> Result<RequestSpectrum, RcpLinkError> {
+    if body.len() != REQUEST_SPECTRUM_SIZE {
+        return Err(RcpLinkError::Truncated);
+    }
+    Ok(RequestSpectrum {
+        seq: u32::from_le_bytes(body[0..4].try_into().unwrap()),
+        channel: body[4],
+        n_averages: body[5],
+        pad0: u16::from_le_bytes(body[6..8].try_into().unwrap()),
     })
 }

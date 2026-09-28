@@ -1,7 +1,7 @@
 // GENERADO por tools/gen_contract.py a partir de
 // contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 //
-// Contrato DSP↔RCP v1.8 — lado MMI.
+// Contrato DSP↔RCP v1.9 — lado MMI.
 //
 // Little-endian, empaquetado. Los enteros de 64 bits se exponen como
 // bigint: no caben en el double de `number` sin perder enteros a partir
@@ -11,7 +11,7 @@
 
 export const MAGIC = 0x4C4D4453;
 export const VERSION_MAJOR = 1;
-export const VERSION_MINOR = 8;
+export const VERSION_MINOR = 9;
 
 const LE = true;
 
@@ -98,6 +98,8 @@ export const MsgType = {
   CONTROL: 9,
   /** down */
   SELFTEST_REQUEST: 10,
+  /** down */
+  REQUEST_SPECTRUM: 11,
 } as const;
 
 /**
@@ -1101,6 +1103,51 @@ export function encodeSelftestRequest(value: SelftestRequest, view?: DataView, b
   const dv = view ?? new DataView(new ArrayBuffer(SELFTEST_REQUEST_SIZE));
   dv.setUint32(base + 0, value.seq, LE);
   dv.setUint32(base + 4, value.nonce, LE);
+  return dv;
+}
+
+/**
+ * Pide una traza de espectro de FI (spectrum_frame) con canal y
+ * promediado elegidos (issue #1 ítem 7, mapeo RCP entrada 6). Alternativa
+ * parametrizada a `command::request_spectrum` (control, sin parámetros), que
+ * sigue existiendo tal cual con su comportamiento de hoy: canal RX_0, un
+ * periodograma por mandato, sin promediar entre mandatos sucesivos.
+ */
+export interface RequestSpectrum {
+  /** Se devuelve como spectrum_frame.seq. */
+  seq: number;
+  /** Canal físico a muestrear — bit único de drx_dsp::channel (RX_0/RX_1/RX_2/RX_3/TX_BURST_0). Sin ese canal en el radial vigente, no hay traza que mandar, igual que hoy con RX_0 fijo. */
+  channel: number;
+  /** Radiales sucesivos de ese canal a acumular en potencia (nunca en dB, ver docs/algorithms/analizador-espectro-fi.md) antes de responder con un único spectrum_frame. 0 o 1: un solo radial, mismo comportamiento que command::request_spectrum. Más promedios reduce el ruido de la traza a costa de la latencia de refresco. */
+  nAverages: number;
+  /** Relleno explícito; vale 0. */
+  pad0: number;
+}
+
+export const REQUEST_SPECTRUM_SIZE = 8;
+
+export const REQUEST_SPECTRUM_OFFSETS = {
+  seq: 0,
+  channel: 4,
+  nAverages: 5,
+  pad0: 6,
+} as const;
+
+export function decodeRequestSpectrum(view: DataView, base = 0): RequestSpectrum {
+  return {
+    seq: view.getUint32(base + 0, LE),
+    channel: view.getUint8(base + 4),
+    nAverages: view.getUint8(base + 5),
+    pad0: view.getUint16(base + 6, LE),
+  };
+}
+
+export function encodeRequestSpectrum(value: RequestSpectrum, view?: DataView, base = 0): DataView {
+  const dv = view ?? new DataView(new ArrayBuffer(REQUEST_SPECTRUM_SIZE));
+  dv.setUint32(base + 0, value.seq, LE);
+  dv.setUint8(base + 4, value.channel);
+  dv.setUint8(base + 5, value.nAverages);
+  dv.setUint16(base + 6, value.pad0, LE);
   return dv;
 }
 

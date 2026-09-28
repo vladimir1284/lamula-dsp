@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/dsp_rcp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DSP↔RCP v1.8 — lado RCP y
+Contrato DSP↔RCP v1.9 — lado RCP y
 banco de pruebas. Es una de las tres implementaciones generadas de la misma
 fuente: si las tres no producen los mismos bytes, el codegen está mal.
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4453
 VERSION_MAJOR = 1
-VERSION_MINOR = 8
+VERSION_MINOR = 9
 
 @dataclass
 class Header:
@@ -55,6 +55,7 @@ class MsgType:
     CONFIG = 8
     CONTROL = 9
     SELFTEST_REQUEST = 10
+    REQUEST_SPECTRUM = 11
 
 @dataclass
 class MomentRay:
@@ -379,6 +380,26 @@ class SelftestRequest:
 
     @classmethod
     def unpack(cls, data: bytes) -> "SelftestRequest":
+        return cls(*struct.unpack(cls.FORMAT, data[: cls.SIZE]))
+
+@dataclass
+class RequestSpectrum:
+    """Pide una traza de espectro de FI (spectrum_frame) con canal y"""
+
+    FORMAT = "<IBBH"
+    SIZE = 8
+    FIELDS = ("seq", "channel", "n_averages", "pad0",)
+
+    seq: int = 0
+    channel: int = 0
+    n_averages: int = 0
+    pad0: int = 0
+
+    def pack(self) -> bytes:
+        return struct.pack(self.FORMAT, *(getattr(self, name) for name in self.FIELDS))
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "RequestSpectrum":
         return cls(*struct.unpack(cls.FORMAT, data[: cls.SIZE]))
 
 class Error:
