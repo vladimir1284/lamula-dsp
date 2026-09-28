@@ -1167,7 +1167,29 @@ la velocidad del trip fuerte para instalación klistrón con SZ864 activo.
 ## Abierto (cross-proyecto): banco de pruebas extremo a extremo contra ZedBoard real
 
 Identificado en revisión de integración cruzada, 2026-09-17. Dueño: los tres equipos (DRx + DSP +
-RCP), no tiene dueño único hoy.
+RCP), no tiene dueño único hoy. **Fase C0 cerrada el 28-sep-2026**; el canónico de este plan es el
+pendiente P-13 del proyecto DRx, esta página sólo registra lo que le toca a este proyecto.
+
+!!! success "28-sep-2026: C0 — este DSP y el RCP real ya hablan entre sí"
+    Sin hardware: la fuente es `crates/service/examples/drx_faker`, que empuja las tramas de
+    `lamula_simulator::pack_rays` por TCP de verdad contra `crates/ingest::tcp` — el mismo código
+    que recibirá a la ZedBoard. El banco vive en el repo del RCP (`tools/hil/run-c0.sh`).
+
+    Eso **no** cierra el hueco que describe esta sección: sigue sin haberse ejercitado la ingesta
+    contra cadencia, jitter y contrapresión de hardware real. Lo que sí cierra es todo lo que
+    estaba tapado *debajo* de ese hueco, y que resultó no depender de la placa en absoluto:
+
+    - Los dos extremos del enlace `DSP↔RCP` escuchaban (`rcp-link::tcp` hacía `bind`+`accept`, y
+      el RCP `asyncio.start_server`). Nadie conectaba. Regla fijada, en
+      `docs/contracts/index.md`: **el productor conecta**. Este DSP conecta al RCP y sigue
+      escuchando al DRx.
+    - `build_moment_ray` publicaba `az_end_deg = az_start_deg` en **todos** los radiales, porque
+      `AssembledRadial` sólo guardaba el azimut del primer pulso. Un radial de ancho cero no es
+      archivable como Level-II ni aceptable para ORPG. Corregido conservando los dos extremos.
+
+    Lo que el método de oráculo gana cuando llegue la Fase B (Python → Rust → hardware real) sigue
+    pendiente, y es lo que dice el punto de abajo: la cuantización de punto fijo real de la FPGA
+    es una fuente de error que ningún simulador de este repo reproduce.
 
 Este proyecto valida su M1 (§8.2) contra su propio simulador sintético de I/Q, con verdad-terreno
 analítica. Eso es correcto para lo que M1 promete, pero significa que **la ingesta 1GbE de este
@@ -1196,6 +1218,7 @@ tabla de fases de §8.2 — es un hueco, no una tarea priorizada. Ver el pendien
 **Plan por fases (2026-09-17)**, del pendiente P-13 de `lamula-drx`, con lo que le toca a este
 proyecto en cada una:
 
+- **Fase C0** (este DSP contra el RCP real, fuente sintética, sin hardware): **hecha**, ver arriba.
 - **Fase A** (cadena DRx sola) y **Fase B** (DSP real contra tráfico real, vector fijo/manual, sin
   RCP todavía) son las que abren el hueco de arriba: apuntar `crates/ingest` contra la salida física
   de una ZedBoard corriendo `vector_source`, en vez de (o adicionalmente a) el simulador sintético
