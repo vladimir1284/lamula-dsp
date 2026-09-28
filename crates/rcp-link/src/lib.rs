@@ -3,9 +3,13 @@
 //! `docs/dsp-plan.md`: la observación volumétrica llega al RCP para
 //! archivarse como Level-II y alimentar a ORPG).
 //!
-//! El DSP es el servidor de este enlace: "the RCP is the sole client"
-//! (`docs/dsp-plan.md:262`) — al contrario que `lamula_ingest`, donde el DSP
-//! también escucha, pero para el DRx.
+//! El DSP es el **cliente** de este enlace y el RCP escucha, por la regla de
+//! despliegue "el productor conecta" que gobierna los dos enlaces de la
+//! cadena (el DRx conecta al DSP en `lamula_ingest`, el DSP conecta al RCP
+//! aquí). "The RCP is the sole client" (`docs/dsp-plan.md:262`) sigue siendo
+//! cierto en lo que dice: el rol arquitectónico — quién manda control/config
+//! y consume el flujo — no quién abre el socket. Ver el doc-comment de
+//! [`tcp`].
 //!
 //! Este crate cubre sólo el cable y la validación de datos de `config`, no
 //! el resto de la lógica de negocio:
@@ -14,8 +18,8 @@
 //!   `spectrum_frame`, `status`, `bite_event`, `config_ack`,
 //!   `selftest_result`, `capabilities`) y decodifica los tres `down`
 //!   (`config`, `control`, `selftest_request`).
-//! - [`tcp`] — adapter real: acepta la conexión del RCP y sirve el enlace
-//!   bidireccional sobre ella.
+//! - [`tcp`] — adapter real: conecta con el RCP, reconectando mientras haga
+//!   falta, y sirve el enlace bidireccional sobre cada conexión.
 //! - [`validate`] — comprueba un `config` entrante contra las `capabilities`
 //!   vigentes y los invariantes físicos que sí están documentados en este
 //!   repositorio (ver el doc-comment del módulo para lo que deliberadamente

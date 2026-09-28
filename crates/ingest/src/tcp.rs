@@ -1,11 +1,12 @@
 //! Adapter AAL real sobre TCP.
 //!
-//! **Supuesto a verificar contra el proyecto LAMULA DRx antes de comisionar
-//! contra hardware real:** el DSP escucha (servidor) y el DRx conecta como
-//! cliente — el contrato `DRx↔DSP` sólo define bytes, no semántica de
-//! socket, y esa decisión vive en el proyecto DRx externo. Si el DRx espera
-//! lo contrario, es cambiar esta función, no la arquitectura: el resto del
-//! pipeline sólo ve `IngestSource`.
+//! El DSP escucha (servidor) y el DRx conecta como cliente, por la regla de
+//! despliegue "el productor conecta" que gobierna los dos enlaces de la
+//! cadena (ver `docs/contracts/index.md` §"Quién abre el socket"). El
+//! contrato `DRx↔DSP` sólo define bytes, no semántica de socket, así que la
+//! regla vive en el despliegue y no en el esquema. Este lado ya la cumple y
+//! no cambia; lo que falta es que el firmware del DRx, cuando exista
+//! (su fase Z4.2), conecte en vez de escuchar.
 //!
 //! El framing usa `Header.payload_len`: se lee la cabecera de 12 B, se
 //! calcula el resto de la trama (`RAY_SIZE + payload_len`) y se lee esa

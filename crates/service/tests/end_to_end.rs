@@ -165,7 +165,14 @@ async fn connect_with_retries(port: u16) -> TcpStream {
 #[tokio::test]
 async fn service_binary_wires_drx_to_rcp() {
     let drx_port = free_port();
-    let rcp_port = free_port();
+    // Este test hace de RCP, y el RCP es el servidor de su enlace ("el
+    // productor conecta"): escucha antes de arrancar el binario, que conecta
+    // hacia aquí. Se queda con el listener en vez de usar `free_port()` para
+    // no abrir una ventana entre elegir el puerto y ocuparlo.
+    let rcp_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("no se pudo escuchar como RCP");
+    let rcp_port = rcp_listener.local_addr().unwrap().port();
 
     let child = ChildGuard(
         Command::new(env!("CARGO_BIN_EXE_lamula-dsp"))
@@ -191,7 +198,12 @@ async fn service_binary_wires_drx_to_rcp() {
             .expect("no se pudo arrancar el binario del servicio"),
     );
 
-    let mut rcp = connect_with_retries(rcp_port).await;
+    // Mismo presupuesto de arranque que `connect_with_retries` (3 s): sin
+    // límite, un binario que no arranca colgaría el test en vez de fallarlo.
+    let (mut rcp, _rcp_peer) = tokio::time::timeout(Duration::from_secs(3), rcp_listener.accept())
+        .await
+        .expect("el binario del servicio no conectó al RCP a tiempo")
+        .expect("accept falló");
     let mut drx = connect_with_retries(drx_port).await;
 
     let config = Config {

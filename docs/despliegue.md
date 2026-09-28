@@ -72,7 +72,8 @@ resumen:
 
 | Variable | Qué es | Por qué no tiene default |
 | --- | --- | --- |
-| `LAMULA_DSP_DRX_ADDR` / `LAMULA_DSP_RCP_ADDR` | Direcciones donde el DSP escucha (servidor) al DRx y al RCP | Direccionamiento de red, específico de instalación |
+| `LAMULA_DSP_DRX_ADDR` | Dirección donde el DSP **escucha** al DRx (el DRx conecta) | Direccionamiento de red, específico de instalación |
+| `LAMULA_DSP_RCP_ADDR` | Dirección del RCP a la que el DSP **conecta** (regla "el productor conecta"); el puerto es el `--dsp-port` del gateway del RCP, 15551 por defecto. No es dirección de escucha: `0.0.0.0` no vale aquí | Direccionamiento de red, específico de instalación |
 | `LAMULA_DSP_FULL_SCALE_COUNTS` | Cuenta ADC de amplitud unitaria | Convención de cuantización sin calibración real confirmada (`crates/ingest::wire`) |
 | `LAMULA_DSP_SSI_COUNTS_PER_TURN` / `LAMULA_DSP_SSI_ZERO_OFFSET_DEG` | Resolución y cero del encoder SSI | Sin documentar en este repositorio (`crates/ingest::angle`) |
 | `LAMULA_DSP_DRX_NCO_FS_HZ` / `LAMULA_DSP_DRX_NCO_WORD_BITS` | Reloj de referencia y anchura del acumulador de fase del NCO de recepción del DRx | Ni `DRx↔DSP` ni `DSP↔RCP` lo exponen — **bloquea comisionar el lazo de AFC contra hardware real** hasta confirmarlo con el proyecto DRx (ver `docs/algorithms/roadmap.md` "Decisiones cerradas" > "Lazo de AFC") |

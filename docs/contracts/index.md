@@ -7,8 +7,33 @@ es **quién manda**.
 
 | Contrato | Lo posee | Esquema | Se genera para |
 | --- | --- | --- | --- |
-| `DRx↔DSP` v0.2 | Proyecto LAMULA DRx | `contract/schema/drx_dsp_v0_1.toml` del repositorio del DRx | C (DRx), Rust (DSP), Python (pruebas) |
-| `DSP↔RCP` v1.0 | **Este proyecto** | `contract/schema/dsp_rcp_v0_1.toml` | Rust (DSP), Python (RCP), TypeScript (MMI) |
+| `DRx↔DSP` v0.4 | Proyecto LAMULA DRx | `contract/schema/drx_dsp_v0_1.toml` del repositorio del DRx | C (DRx), Rust (DSP), Python (pruebas) |
+| `DSP↔RCP` v1.9 | **Este proyecto** | `contract/schema/dsp_rcp_v0_1.toml` | Rust (DSP), Python (RCP), TypeScript (MMI) |
+
+## Quién abre el socket: el productor conecta
+
+Ningún esquema dice nada de sockets — los dos definen bytes, no transporte. La
+regla de despliegue de la cadena, en cambio, sí es única y vale para los dos
+enlaces: **el productor conecta y el consumidor escucha.**
+
+| Enlace | Escucha | Conecta |
+| --- | --- | --- |
+| `DRx↔DSP` | DSP (`LAMULA_DSP_DRX_ADDR`) | DRx |
+| `DSP↔RCP` | RCP (`--dsp-port` de su gateway, 15551 por defecto) | DSP (`LAMULA_DSP_RCP_ADDR`) |
+
+El motivo es operativo, no estético: en los dos casos el consumidor está
+levantado de forma permanente y el productor es el que arranca, se reinicia o
+se reconfigura. Con esta regla la lógica de reconexión vive en un solo lado de
+cada enlace —el que se cae— y el consumidor no necesita saber cuándo volverá su
+par.
+
+Cuidado con una lectura que ya causó un desencuentro real entre repositorios:
+«the RCP is the sole client» (`dsp-plan.md` §12) describe el **rol
+arquitectónico** —el RCP manda control y configuración, consume el flujo de
+momentos, archiva como Level-II y alimenta a ORPG; el DSP no tiene GUI ni habla
+con ORPG— y **no** quién abre el socket TCP. Durante un tiempo los dos extremos
+de `DSP↔RCP` escucharon a la vez, así que el enlace no podía establecerse entre
+los binarios reales.
 
 ## DRx↔DSP: se consume, no se decide
 

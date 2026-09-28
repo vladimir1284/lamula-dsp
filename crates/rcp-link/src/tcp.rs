@@ -1,6 +1,16 @@
-//! Adapter TCP real del enlace `DSP↔RCP`. El DSP escucha (servidor): "the
-//! RCP is the sole client" (`docs/dsp-plan.md:262`) — al revés que
-//! `lamula_ingest::tcp`, que también hace escuchar al DSP, pero para el DRx.
+//! Adapter TCP real del enlace `DSP↔RCP`. **El DSP conecta (cliente) y el
+//! RCP escucha (servidor)**, por la regla de despliegue "el productor
+//! conecta" que gobierna los dos enlaces de la cadena: el DRx conecta al
+//! DSP (`lamula_ingest::tcp`, donde el DSP sí escucha) y el DSP conecta al
+//! RCP. En los dos casos el consumidor está siempre levantado y el
+//! productor es quien rearranca, así que la reconexión vive en un solo lado
+//! de cada enlace.
+//!
+//! Eso NO contradice "the RCP is the sole client" (`docs/dsp-plan.md:262`):
+//! esa frase describe el rol arquitectónico — el RCP es quien manda
+//! control/config, consume el flujo de momentos, archiva y alimenta a ORPG,
+//! y el DSP no tiene GUI ni habla con ORPG — no quién abre el socket. El
+//! RCP sigue siendo el único par de este enlace.
 //!
 //! El framing es uniforme para los diez tipos de mensaje: 12 B de cabecera
 //! común, luego `payload_len` bytes más (ver `crate::wire`). Eso evita el
@@ -9,8 +19,14 @@
 //!
 //! Reconecta: al cerrarse una conexión (cierre limpio del lector, o error de
 //! escritura como `BrokenPipe`/`ConnectionReset` porque el RCP ya se fue)
-//! vuelve a `listener.accept()` y sigue sirviendo los mismos canales
-//! `down`/`up`, en vez de terminar la tarea. El contrato exige un
+//! vuelve a conectar tras [`RECONNECT_DELAY`] y sigue sirviendo los mismos
+//! canales `down`/`up`, en vez de terminar la tarea. Un `connect` que falla
+//! tampoco es fatal y se reintenta igual: al arrancar el sistema el DSP
+//! puede estar levantado antes que el RCP, y un RCP que se reinicia no debe
+//! llevarse por delante al DSP. Lo que sí sigue siendo fatal es un error de
+//! **decodificación** (magic, versión, longitud): eso no es transporte, es
+//! el par hablando otro idioma, y reconectar sólo lo escondería. El contrato
+//! exige un
 //! `selftest_request`/`selftest_result` en cada reconexión (ver el esquema:
 //! "Obligatorio en cada reconexión del RCP"), pero eso lo inicia el RCP —
 //! este módulo sólo responde, no lo fuerza. El `Session` (fase/config) no se
@@ -20,8 +36,10 @@
 //! en el canal (sujeto a `up_capacity`) y se drenan al reconectar; no se
 //! descartan ni se bloquea a quien los manda salvo que el canal esté lleno.
 
+use std::time::Duration;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, ToSocketAddrs};
+use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -30,11 +48,11 @@ use lamula_contract::dsp_rcp::HEADER_SIZE;
 use crate::error::RcpLinkError;
 use crate::wire::{decode_down_frame, encode_up_message, DownMessage, UpMessage};
 
-/// Escucha en `addr`. Separado de [`spawn`] para que quien llama pueda leer
-/// el puerto real cuando `addr` pide el puerto 0 (típico en tests).
-pub async fn bind(addr: impl ToSocketAddrs) -> Result<TcpListener, RcpLinkError> {
-    Ok(TcpListener::bind(addr).await?)
-}
+/// Espera entre intentos de conexión al RCP. Fija, no exponencial: los dos
+/// extremos viven en la misma red privada de operación, un reintento por
+/// segundo no satura nada, y una espera creciente sólo retrasaría la
+/// reconexión justo cuando el operador está esperando a que vuelva el flujo.
+pub const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
 /// Un enlace en marcha: mensajes `down` ya decodificados por `down`, un
 /// `up` para mandar mensajes `up`, y `task` para propagar errores o hacer
@@ -46,8 +64,8 @@ pub struct RcpLink {
     pub task: JoinHandle<Result<(), RcpLinkError>>,
 }
 
-/// Acepta conexiones sobre `listener`, una detrás de otra, y sirve el
-/// enlace bidireccional sobre cada una: una tarea decodifica cada trama
+/// Conecta a `addr` (el RCP), una y otra vez mientras haga falta, y sirve el
+/// enlace bidireccional sobre cada conexión: una tarea decodifica cada trama
 /// `down` que llegue y la manda por `down`; en paralelo, este bucle codifica
 /// cada [`UpMessage`] recibido por `up` y lo escribe al socket.
 /// `down_capacity`/`up_capacity` son el backpressure real de cada canal. Ver
@@ -58,17 +76,29 @@ pub struct RcpLink {
 /// simulador y no del DRx real. Quien monta el enlace lo sabe; los
 /// productores de mensajes, no.
 pub fn spawn(
-    listener: TcpListener,
+    addr: impl Into<String>,
     down_capacity: usize,
     up_capacity: usize,
     header_flags: u8,
 ) -> RcpLink {
     let (down_tx, down_rx) = mpsc::channel(down_capacity);
     let (up_tx, mut up_rx) = mpsc::channel::<UpMessage>(up_capacity);
+    let addr = addr.into();
 
     let task: JoinHandle<Result<(), RcpLinkError>> = tokio::spawn(async move {
         loop {
-            let (socket, _peer) = listener.accept().await?;
+            let socket = match TcpStream::connect(&addr).await {
+                Ok(socket) => socket,
+                // El RCP todavía no está levantado, o se está reiniciando.
+                // No es un fallo de este componente: esperar y reintentar.
+                Err(e) => {
+                    eprintln!(
+                        "RCP en {addr} no acepta conexión ({e}); reintento en {RECONNECT_DELAY:?}"
+                    );
+                    tokio::time::sleep(RECONNECT_DELAY).await;
+                    continue;
+                }
+            };
             let (mut rd, mut wr) = tokio::io::split(socket);
             let down_tx = down_tx.clone();
 
@@ -148,13 +178,31 @@ pub fn spawn(
                             eprintln!(
                                 "up_message descartado: conexión RCP cerrada justo antes de escribirlo"
                             );
+                            tokio::time::sleep(RECONNECT_DELAY).await;
                             continue;
                         }
-                        Err(mpsc::error::TryRecvError::Empty) => continue,
+                        Err(mpsc::error::TryRecvError::Empty) => {
+                            tokio::time::sleep(RECONNECT_DELAY).await;
+                            continue;
+                        }
                     }
                 }
                 Err(RcpLinkError::LinkClosed) => return Ok(()),
-                Err(e) => return Err(e), // fallo real de socket: fatal
+                // Error de transporte: el RCP se cayó o la red se cortó. Con
+                // el DSP de lado cliente eso es un evento normal de
+                // operación, no un fallo de este componente — se reconecta,
+                // igual que tras un cierre limpio.
+                Err(RcpLinkError::Io(e)) => {
+                    eprintln!(
+                        "enlace con el RCP en {addr} caído ({e}); reintento en {RECONNECT_DELAY:?}"
+                    );
+                    tokio::time::sleep(RECONNECT_DELAY).await;
+                    continue;
+                }
+                // Magic, versión o longitud inválidos: el par no habla este
+                // contrato. Reconectar sólo repetiría el error en bucle y lo
+                // escondería del operador.
+                Err(e) => return Err(e),
             }
         }
     });

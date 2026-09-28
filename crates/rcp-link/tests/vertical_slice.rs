@@ -32,7 +32,6 @@ use lamula_simulator::{generate_cell, pack_rays, CellParams, RayHeaderFields};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tokio::io::AsyncReadExt;
-use tokio::net::TcpStream;
 
 const FULL_SCALE: i16 = i16::MAX;
 const SPEED_OF_LIGHT_M_S: f64 = 299_792_458.0;
@@ -166,11 +165,11 @@ async fn moment_stream_reaches_simulated_rcp_consumer() {
         },
     ];
 
-    let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
+    // El test hace de RCP: escucha, y el enlace del DSP conecta hacia aquí.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let link = lamula_rcp_link::tcp::spawn(listener, 4, 4, 0);
-
-    let mut rcp_client = TcpStream::connect(local_addr).await.unwrap();
+    let link = lamula_rcp_link::tcp::spawn(local_addr.to_string(), 4, 4, 0);
+    let (mut rcp_client, _peer) = listener.accept().await.unwrap();
 
     link.up
         .send(UpMessage::MomentRay { ray, moments })

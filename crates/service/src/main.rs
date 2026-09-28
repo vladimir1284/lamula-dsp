@@ -198,10 +198,11 @@ async fn main() {
     println!("DRx (AAL) escuchando en {}", cfg.drx_addr);
     let mut ingest = lamula_ingest::tcp::spawn(drx_listener, cfg.full_scale_counts, 16);
 
-    let rcp_listener = lamula_rcp_link::tcp::bind(&cfg.rcp_addr)
-        .await
-        .unwrap_or_else(|e| panic!("no se pudo escuchar RCP en {}: {e}", cfg.rcp_addr));
-    println!("RCP escuchando en {}", cfg.rcp_addr);
+    // El DSP es el que conecta ("el productor conecta", ver el doc del módulo
+    // `lamula_rcp_link::tcp`): `rcp_addr` es el destino, no una dirección de
+    // escucha. No se espera aquí a que el RCP esté levantado — `spawn`
+    // reintenta por su cuenta y el resto del servicio arranca igual.
+    println!("RCP: conectando a {}", cfg.rcp_addr);
     // Procedencia: se estampa en cada trama `up`, no se anuncia una sola vez.
     let header_flags = if cfg.simulated_source {
         println!("AVISO: fuente SIMULADA; las tramas salen marcadas como tal");
@@ -209,7 +210,7 @@ async fn main() {
     } else {
         0
     };
-    let link = lamula_rcp_link::tcp::spawn(rcp_listener, 16, 16, header_flags);
+    let link = lamula_rcp_link::tcp::spawn(cfg.rcp_addr.clone(), 16, 16, header_flags);
     let mut down = link.down;
     let up = link.up;
 

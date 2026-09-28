@@ -8,7 +8,9 @@ rust-version.workspace = true
 
 [dependencies]
 lamula-contract = { path = "../contract" }
-tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util"] }
+# `time` lo pide la espera entre reintentos de conexión al RCP
+# (`tcp::RECONNECT_DELAY`); los demás crates del workspace no lo necesitan.
+tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "macros", "io-util", "time"] }
 
 [dev-dependencies]
 lamula-ingest = { path = "../ingest" }

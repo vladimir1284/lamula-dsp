@@ -6,7 +6,6 @@
 use lamula_contract::dsp_rcp::{self, Control, MsgType, Status, CONTROL_SIZE, HEADER_SIZE, MAGIC};
 use lamula_rcp_link::wire::{DownMessage, UpMessage};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 fn header_bytes(msg_type: MsgType, payload_len: u32) -> Vec<u8> {
     let mut buf = Vec::with_capacity(HEADER_SIZE);
@@ -21,11 +20,11 @@ fn header_bytes(msg_type: MsgType, payload_len: u32) -> Vec<u8> {
 
 #[tokio::test]
 async fn control_frame_from_rcp_arrives_decoded() {
-    let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
+    // El test hace de RCP: escucha, y el enlace del DSP conecta hacia aquí.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let mut link = lamula_rcp_link::tcp::spawn(listener, 16, 16, 0);
-
-    let mut client = TcpStream::connect(local_addr).await.unwrap();
+    let mut link = lamula_rcp_link::tcp::spawn(local_addr.to_string(), 16, 16, 0);
+    let (mut client, _peer) = listener.accept().await.unwrap();
     let control = Control {
         seq: 3,
         command: dsp_rcp::command::REQUEST_STATUS,
@@ -49,11 +48,11 @@ async fn control_frame_from_rcp_arrives_decoded() {
 
 #[tokio::test]
 async fn status_sent_up_arrives_on_the_wire() {
-    let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
+    // El test hace de RCP: escucha, y el enlace del DSP conecta hacia aquí.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let link = lamula_rcp_link::tcp::spawn(listener, 16, 16, 0);
-
-    let mut client = TcpStream::connect(local_addr).await.unwrap();
+    let link = lamula_rcp_link::tcp::spawn(local_addr.to_string(), 16, 16, 0);
+    let (mut client, _peer) = listener.accept().await.unwrap();
 
     let status = Status {
         uptime_s: 7,
@@ -113,12 +112,16 @@ async fn status_sent_up_arrives_on_the_wire() {
 /// todos los mensajes `up` que salen por él.
 #[tokio::test]
 async fn simulated_source_flag_is_stamped_on_every_up_frame() {
-    let listener = lamula_rcp_link::tcp::bind("127.0.0.1:0").await.unwrap();
+    // El test hace de RCP: escucha, y el enlace del DSP conecta hacia aquí.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let local_addr = listener.local_addr().unwrap();
-    let link =
-        lamula_rcp_link::tcp::spawn(listener, 16, 16, dsp_rcp::header_flag::SIMULATED_SOURCE);
-
-    let mut client = TcpStream::connect(local_addr).await.unwrap();
+    let link = lamula_rcp_link::tcp::spawn(
+        local_addr.to_string(),
+        16,
+        16,
+        dsp_rcp::header_flag::SIMULATED_SOURCE,
+    );
+    let (mut client, _peer) = listener.accept().await.unwrap();
 
     // Dos mensajes `up` distintos: la bandera no es de un tipo de mensaje,
     // es del enlace.
