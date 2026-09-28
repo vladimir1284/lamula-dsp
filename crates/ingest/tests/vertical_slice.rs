@@ -37,6 +37,7 @@ async fn simulator_to_moments_recovers_ground_truth_velocity() {
         timestamp_step_ns: (params.prt_s * 1.0e9) as u64,
         trigger_count_start: 0,
         azimuth_raw: 0,
+        azimuth_step_raw: 0,
         elevation_raw: 0,
         prf_div: 4,
         pulse_width_idx: 0,

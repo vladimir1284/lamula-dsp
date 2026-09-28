@@ -36,6 +36,7 @@ fn header_fields(seq_start: u32, prt_s: f64) -> RayHeaderFields {
         timestamp_step_ns: (prt_s * 1.0e9) as u64,
         trigger_count_start: seq_start,
         azimuth_raw: 4096,
+        azimuth_step_raw: 0,
         elevation_raw: 512,
         prf_div: 4,
         pulse_width_idx: 1,

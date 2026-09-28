@@ -123,6 +123,7 @@ mod tests {
             timestamp_step_ns: 1,
             trigger_count_start: 0,
             azimuth_raw: 100,
+            azimuth_step_raw: 0,
             elevation_raw: 5,
             prf_div: 4,
             pulse_width_idx: 0,

@@ -15,3 +15,8 @@ tokio = { version = "1", features = ["net", "sync", "rt", "rt-multi-thread", "ma
 lamula-simulator = { path = "../simulator" }
 lamula-moments = { path = "../moments" }
 rand = "0.8"
+# Los tests de transporte usan `tokio::time`; el codigo de produccion de este
+# crate no. Compilaba solo porque otro crate del workspace activaba la feature
+# y cargo las unifica en una compilacion completa: `cargo test -p lamula-ingest`
+# a secas fallaba con E0433.
+tokio = { version = "1", features = ["time"] }

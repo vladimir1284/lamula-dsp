@@ -327,6 +327,7 @@ async fn service_binary_wires_drx_to_rcp() {
         timestamp_step_ns: (prt_s * 1.0e9) as u64,
         trigger_count_start: 0,
         azimuth_raw: 512,
+        azimuth_step_raw: 0,
         elevation_raw: 0,
         prf_div: 4,
         pulse_width_idx: 0,

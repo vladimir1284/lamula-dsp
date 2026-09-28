@@ -56,6 +56,7 @@ fn pipeline_survives_thousands_of_varied_radials_without_panicking_or_publishing
             timestamp_step_ns: 1000,
             trigger_count_start: i as u32,
             azimuth_raw: (i as u32 * 37) % 4096,
+            azimuth_step_raw: 0,
             elevation_raw: 0,
             prf_div: 1,
             pulse_width_idx: 0,

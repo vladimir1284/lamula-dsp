@@ -37,7 +37,17 @@ pub struct AssembledRadial {
     pub timestamp_ns_start: u64,
     pub trigger_count_start: u32,
     pub azimuth_raw: u32,
+    /// Azimut del **último** pulso del radial, en cuentas de encoder. Con la
+    /// antena en movimiento no coincide con `azimuth_raw`: los dos juntos son
+    /// el sector que cubre el radial, que es lo que el RCP necesita para
+    /// Level-II y para el feed a ORPG. Iguales sólo si la antena está parada
+    /// (modo POINT/MANUAL) o si la fuente no mueve el azimut dentro del
+    /// radial.
+    pub azimuth_raw_end: u32,
     pub elevation_raw: u32,
+    /// Elevación del último pulso del radial. Mismo criterio que
+    /// `azimuth_raw_end`; en un PPI no cambia, en un RHI sí.
+    pub elevation_raw_end: u32,
     pub prf_div: u32,
     pub pulse_width_idx: u8,
     pub pulse_mode: u8,
@@ -209,6 +219,10 @@ impl RadialAssembler {
         let ray_flags: Vec<u8> = frames.iter().map(|f| f.ray_flags).collect();
 
         let first = &frames[0];
+        // Último pulso del radial: es lo que fija dónde termina el barrido.
+        // Sin él, `azimuth_raw` solo dice dónde empezó y el consumidor no
+        // puede reconstruir el sector que cubre el radial.
+        let last = &frames[frames.len() - 1];
         let n_channels = first.channels.len();
         let bins = first.channels.first().map_or(0, Vec::len);
         let mut channels: Vec<Vec<Vec<Complex64>>> = (0..n_channels)
@@ -231,7 +245,9 @@ impl RadialAssembler {
             timestamp_ns_start: first.timestamp_ns,
             trigger_count_start: first.trigger_count,
             azimuth_raw: first.azimuth_raw,
+            azimuth_raw_end: last.azimuth_raw,
             elevation_raw: first.elevation_raw,
+            elevation_raw_end: last.elevation_raw,
             prf_div: first.prf_div,
             pulse_width_idx: first.pulse_width_idx,
             pulse_mode: first.pulse_mode,
@@ -266,6 +282,31 @@ mod tests {
             channel_mask: 0b0001,
             ray_flags,
             channels: vec![vec![Complex64::new(value, 0.0)]],
+        }
+    }
+
+    #[test]
+    fn radial_keeps_the_azimuth_of_both_ends_not_just_the_first() {
+        // Regresión: el radial guardaba sólo `azimuth_raw` del primer pulso,
+        // así que aguas abajo `az_end_deg` salía igual que `az_start_deg` y
+        // todos los radiales tenían ancho cero — inservibles para Level-II y
+        // rechazados por el RCP. El azimut del último pulso ya viajaba en el
+        // cable; lo que faltaba era conservarlo.
+        let mut assembler = RadialAssembler::new(3);
+        for (i, az) in [100u32, 102, 104].into_iter().enumerate() {
+            let mut f = frame(i as u32, 1.0);
+            f.azimuth_raw = az;
+            f.elevation_raw = 7 + i as u32;
+            let done = assembler.feed(f).unwrap();
+            if i < 2 {
+                assert_eq!(done, None);
+            } else {
+                let radial = done.expect("el tercer pulso cierra el radial");
+                assert_eq!(radial.azimuth_raw, 100);
+                assert_eq!(radial.azimuth_raw_end, 104);
+                assert_eq!(radial.elevation_raw, 7);
+                assert_eq!(radial.elevation_raw_end, 9);
+            }
         }
     }
 

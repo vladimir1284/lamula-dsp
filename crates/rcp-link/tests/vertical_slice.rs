@@ -72,6 +72,7 @@ async fn moment_stream_reaches_simulated_rcp_consumer() {
         timestamp_step_ns: (prt_s * 1.0e9) as u64,
         trigger_count_start: 0,
         azimuth_raw,
+        azimuth_step_raw: 0,
         elevation_raw,
         prf_div: 4,
         pulse_width_idx: 0,

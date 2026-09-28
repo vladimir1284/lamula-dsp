@@ -15,6 +15,12 @@ pub struct RayHeaderFields {
     pub timestamp_step_ns: u64,
     pub trigger_count_start: u32,
     pub azimuth_raw: u32,
+    /// Avance de azimut por pulso, en cuentas de encoder. La antena no se
+    /// para durante un radial: con `0` todas las tramas salen con el mismo
+    /// azimut, el radial no barre nada y el consumidor no puede decir de
+    /// dónde a dónde va. Los tests que no miran el azimut lo dejan en 0 a
+    /// propósito; lo que emula una antena en movimiento, no.
+    pub azimuth_step_raw: u32,
     pub elevation_raw: u32,
     pub prf_div: u32,
     pub pulse_width_idx: u8,
@@ -89,7 +95,12 @@ pub fn pack_rays(
                     .wrapping_add(i as u32)
                     .to_le_bytes(),
             );
-            buf.extend_from_slice(&fields.azimuth_raw.to_le_bytes());
+            buf.extend_from_slice(
+                &fields
+                    .azimuth_raw
+                    .wrapping_add(fields.azimuth_step_raw.wrapping_mul(i as u32))
+                    .to_le_bytes(),
+            );
             buf.extend_from_slice(&fields.elevation_raw.to_le_bytes());
             buf.extend_from_slice(&fields.prf_div.to_le_bytes());
             buf.extend_from_slice(&(bins as u16).to_le_bytes());
