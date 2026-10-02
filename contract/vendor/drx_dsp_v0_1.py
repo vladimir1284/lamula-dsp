@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/drx_dsp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DRx↔DSP v0.4 — referencia
+Contrato DRx↔DSP v0.6 — referencia
 de los tests de contrato. Es la tercera implementación generada de la misma
 fuente: si esta y la de C no producen los mismos bytes, el codegen está mal.
 """
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4452
 VERSION_MAJOR = 0
-VERSION_MINOR = 4
+VERSION_MINOR = 6
 
 @dataclass
 class Header:
@@ -44,6 +44,7 @@ class MsgType:
     CONFIG = 3
     CONFIG_ACK = 4
     AFC = 5
+    TEST_STIMULUS_SELECT = 6
 
 @dataclass
 class Ray:
@@ -103,19 +104,25 @@ class Status:
 class Config:
     """Configuración completa. Se aplica de forma atómica: o entra entera o se"""
 
-    FORMAT = "<IIHBBBBBBIIIIIIII"
-    SIZE = 48
-    FIELDS = ("seq", "prf_div", "range_bins", "pulse_width_idx", "pulse_mode", "cell_mode", "channel_mask", "scan_mode", "pad0", "trigger_delay_0", "trigger_delay_1", "trigger_delay_2", "trigger_delay_3", "trigger_width_0", "trigger_width_1", "trigger_width_2", "trigger_width_3",)
+    FORMAT = "<IIIHHHHBBBBBBBBIIIIIIII"
+    SIZE = 60
+    FIELDS = ("seq", "prf_div_low", "prf_div_high", "range_bins_low", "range_bins_high", "n_pulses_low", "n_pulses_high", "pulse_width_idx_low", "pulse_width_idx_high", "pulse_mode", "cell_mode", "channel_mask", "scan_mode", "pad0", "pad1", "trigger_delay_0", "trigger_delay_1", "trigger_delay_2", "trigger_delay_3", "trigger_width_0", "trigger_width_1", "trigger_width_2", "trigger_width_3",)
 
     seq: int = 0
-    prf_div: int = 0
-    range_bins: int = 0
-    pulse_width_idx: int = 0
+    prf_div_low: int = 0
+    prf_div_high: int = 0
+    range_bins_low: int = 0
+    range_bins_high: int = 0
+    n_pulses_low: int = 0
+    n_pulses_high: int = 0
+    pulse_width_idx_low: int = 0
+    pulse_width_idx_high: int = 0
     pulse_mode: int = 0
     cell_mode: int = 0
     channel_mask: int = 0
     scan_mode: int = 0
     pad0: int = 0
+    pad1: int = 0
     trigger_delay_0: int = 0
     trigger_delay_1: int = 0
     trigger_delay_2: int = 0
@@ -171,6 +178,26 @@ class Afc:
     def unpack(cls, data: bytes) -> "Afc":
         return cls(*struct.unpack(cls.FORMAT, data[: cls.SIZE]))
 
+@dataclass
+class TestStimulusSelect:
+    """Elige qué vector de estímulo reproduce `vector_source` en la PL."""
+
+    FORMAT = "<IBBH"
+    SIZE = 8
+    FIELDS = ("seq", "vector_id", "pad0", "repeat",)
+
+    seq: int = 0
+    vector_id: int = 0
+    pad0: int = 0
+    repeat: int = 0
+
+    def pack(self) -> bytes:
+        return struct.pack(self.FORMAT, *(getattr(self, name) for name in self.FIELDS))
+
+    @classmethod
+    def unpack(cls, data: bytes) -> "TestStimulusSelect":
+        return cls(*struct.unpack(cls.FORMAT, data[: cls.SIZE]))
+
 class Error:
     """Códigos de rechazo del plano de control."""
 
@@ -184,6 +211,8 @@ class Error:
     CHANNEL_MASK_INVALID = 7
     SCAN_MODE_INVALID = 8
     NOT_CONFIGURED = 9
+    VECTOR_UNKNOWN = 10
+    UNIMPLEMENTED = 11
 
 class Channel:
     """Bit por canal físico presente en channel_mask. El orden de channels[] en el payload de ray sigue el orden ascendente de los bits puestos en channel_mask; cada canal aporta los mismos `bins` que el resto del rayo. rx_0..rx_3 son 2 conversores por polarización (H, V): uno a ganancia nominal y otro con la señal atenuada, para extender el rango dinámico (confirmado en sesión, 8-sep-2026). El emparejamiento H/V de arriba está confirmado; el orden concreto rx_0 vs rx_1 (¿cuál es el nominal y cuál el atenuado de cada polarización?) es una CONVENCIÓN asumida aquí, sin confirmar todavía contra el cableado físico — ver docs/alcance/pendientes.md, A10."""
@@ -202,6 +231,7 @@ class RayFlag:
     TRUNCATED = 4
     FIRST_AFTER_CONFIG = 8
     TX_POL_V = 16
+    BATCH_HIGH = 32
 
 class BiteFlag:
     """Catálogo de fallos del plan de testing."""
@@ -213,3 +243,15 @@ class BiteFlag:
     MMCM_UNLOCKED = 16
     LINK_DOWN = 32
     CONFIG_REJECTED = 64
+
+class StimulusVector:
+    """Catálogo v1 de vectores de estímulo, los ocho casos de tools/gen_l1_vectors.py — la misma lista contra la que L1 compara la IP real de Xilinx con el modelo dorado bajo D-12. El catálogo puede CRECER dentro del mismo version_major (añadir un valor es compatible hacia atrás); reordenar o quitar valores no. En la plataforma objetivo, con ADC reales, esta enumeración no tiene efecto."""
+
+    TONO_IF = 0
+    TONO_DESPLAZADO = 1
+    DOS_TONOS = 2
+    TONO_DESPLAZADO_NEG = 3
+    TONO_CON_RUIDO = 4
+    TONO_CON_OFFSET_DC = 5
+    TONO_DESBALANCEADO = 6
+    TONO_SOBRE_ESCALA = 7

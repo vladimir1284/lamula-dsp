@@ -37,10 +37,10 @@ pub fn encode_afc_frame(afc: &Afc) -> Vec<u8> {
 }
 
 /// Serializa un mensaje `Config` (`DRx↔DSP`, sentido `down`, issue #1 ítem 5)
-/// como cabecera de 12 B seguida de sus 48 B, sin carga variable. Orden de
-/// campos igual que `contract/vendor/drx_dsp_v0_1.rs::Config` — ver
-/// `crate::ray::build_drx_config` en `lamula-dsp-service` para cómo se
-/// construye este valor a partir de `dsp_rcp::Config`.
+/// como cabecera de 12 B seguida de sus 60 B, sin carga variable. Orden de
+/// campos igual que `contract/vendor/drx_dsp_v0_1.rs::Config` (v0.6, dos
+/// lotes) — ver `crate::ray::build_drx_config` en `lamula-dsp-service` para
+/// cómo se construye este valor a partir de `dsp_rcp::Config`.
 pub fn encode_config_frame(cfg: &Config) -> Vec<u8> {
     let mut buf = Vec::with_capacity(HEADER_SIZE + CONFIG_SIZE);
     buf.extend_from_slice(&MAGIC.to_le_bytes());
@@ -51,14 +51,20 @@ pub fn encode_config_frame(cfg: &Config) -> Vec<u8> {
     buf.extend_from_slice(&(CONFIG_SIZE as u32).to_le_bytes());
 
     buf.extend_from_slice(&cfg.seq.to_le_bytes());
-    buf.extend_from_slice(&cfg.prf_div.to_le_bytes());
-    buf.extend_from_slice(&cfg.range_bins.to_le_bytes());
-    buf.push(cfg.pulse_width_idx);
+    buf.extend_from_slice(&cfg.prf_div_low.to_le_bytes());
+    buf.extend_from_slice(&cfg.prf_div_high.to_le_bytes());
+    buf.extend_from_slice(&cfg.range_bins_low.to_le_bytes());
+    buf.extend_from_slice(&cfg.range_bins_high.to_le_bytes());
+    buf.extend_from_slice(&cfg.n_pulses_low.to_le_bytes());
+    buf.extend_from_slice(&cfg.n_pulses_high.to_le_bytes());
+    buf.push(cfg.pulse_width_idx_low);
+    buf.push(cfg.pulse_width_idx_high);
     buf.push(cfg.pulse_mode);
     buf.push(cfg.cell_mode);
     buf.push(cfg.channel_mask);
     buf.push(cfg.scan_mode);
     buf.push(cfg.pad0);
+    buf.push(cfg.pad1);
     buf.extend_from_slice(&cfg.trigger_delay_0.to_le_bytes());
     buf.extend_from_slice(&cfg.trigger_delay_1.to_le_bytes());
     buf.extend_from_slice(&cfg.trigger_delay_2.to_le_bytes());
@@ -80,14 +86,20 @@ mod config_encode_tests {
     fn encode_config_frame_matches_header_and_payload_layout() {
         let cfg = Config {
             seq: 7,
-            prf_div: 40,
-            range_bins: 1000,
-            pulse_width_idx: 2,
+            prf_div_low: 40,
+            prf_div_high: 50,
+            range_bins_low: 1000,
+            range_bins_high: 1100,
+            n_pulses_low: 64,
+            n_pulses_high: 32,
+            pulse_width_idx_low: 2,
+            pulse_width_idx_high: 3,
             pulse_mode: 0,
             cell_mode: 1,
             channel_mask: channel::RX_0 | channel::RX_2,
             scan_mode: 1,
             pad0: 0,
+            pad1: 0,
             trigger_delay_0: 100,
             trigger_delay_1: 200,
             trigger_delay_2: 300,
@@ -107,17 +119,23 @@ mod config_encode_tests {
         );
         assert_eq!(u32::from_le_bytes(frame[12..16].try_into().unwrap()), 7);
         assert_eq!(u32::from_le_bytes(frame[16..20].try_into().unwrap()), 40);
-        assert_eq!(u16::from_le_bytes(frame[20..22].try_into().unwrap()), 1000);
-        assert_eq!(frame[22], 2);
-        assert_eq!(frame[23], 0);
-        assert_eq!(frame[24], 1);
-        assert_eq!(frame[25], channel::RX_0 | channel::RX_2);
-        assert_eq!(frame[26], 1);
-        assert_eq!(frame[27], 0);
-        assert_eq!(u32::from_le_bytes(frame[28..32].try_into().unwrap()), 100);
-        assert_eq!(u32::from_le_bytes(frame[40..44].try_into().unwrap()), 400);
-        assert_eq!(u32::from_le_bytes(frame[44..48].try_into().unwrap()), 10);
-        assert_eq!(u32::from_le_bytes(frame[56..60].try_into().unwrap()), 40);
+        assert_eq!(u32::from_le_bytes(frame[20..24].try_into().unwrap()), 50);
+        assert_eq!(u16::from_le_bytes(frame[24..26].try_into().unwrap()), 1000);
+        assert_eq!(u16::from_le_bytes(frame[26..28].try_into().unwrap()), 1100);
+        assert_eq!(u16::from_le_bytes(frame[28..30].try_into().unwrap()), 64);
+        assert_eq!(u16::from_le_bytes(frame[30..32].try_into().unwrap()), 32);
+        assert_eq!(frame[32], 2);
+        assert_eq!(frame[33], 3);
+        assert_eq!(frame[34], 0);
+        assert_eq!(frame[35], 1);
+        assert_eq!(frame[36], channel::RX_0 | channel::RX_2);
+        assert_eq!(frame[37], 1);
+        assert_eq!(frame[38], 0);
+        assert_eq!(frame[39], 0);
+        assert_eq!(u32::from_le_bytes(frame[40..44].try_into().unwrap()), 100);
+        assert_eq!(u32::from_le_bytes(frame[52..56].try_into().unwrap()), 400);
+        assert_eq!(u32::from_le_bytes(frame[56..60].try_into().unwrap()), 10);
+        assert_eq!(u32::from_le_bytes(frame[68..72].try_into().unwrap()), 40);
     }
 }
 

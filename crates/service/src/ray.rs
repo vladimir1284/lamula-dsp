@@ -1007,18 +1007,32 @@ fn drx_scan_mode(cfg_sweep_mode: u8) -> Option<u8> {
 /// `Config` de RCP: trazable en capturas de cable aunque este binario no
 /// lea todavía el `config_ack` de vuelta del DRx (mismo fire-and-forget que
 /// ya tiene el canal de `Afc`, `lamula_ingest::tcp`).
+/// Construye el `config` de 2 lotes del contrato (v0.6) a partir del
+/// `dsp_rcp::Config` de 1 lote. El RCP todavía no expone un segundo lote
+/// (D-13/Batch mode NEXRAD sigue sin cablear de ese lado — ver P-15 en
+/// lamula-drx), así que `low` y `high` llevan los mismos valores: un
+/// radial de un solo lote es, en el contrato de 2 lotes, uno donde ambos
+/// lotes coinciden. Esto no cambia el comportamiento actual; sólo habla el
+/// contrato nuevo. Cuando el RCP exponga el segundo lote, `high` deja de
+/// copiar `low` aquí.
 pub fn build_drx_config(config: &Config, trigger_fs_hz: f64) -> Option<drx_dsp::Config> {
     let scan_mode = drx_scan_mode(config.sweep_mode)?;
     Some(drx_dsp::Config {
         seq: config.seq,
-        prf_div: config.prf_div,
-        range_bins: config.n_gates,
-        pulse_width_idx: config.pulse_width_idx,
+        prf_div_low: config.prf_div,
+        prf_div_high: config.prf_div,
+        range_bins_low: config.n_gates,
+        range_bins_high: config.n_gates,
+        n_pulses_low: config.n_pulses,
+        n_pulses_high: config.n_pulses,
+        pulse_width_idx_low: config.pulse_width_idx,
+        pulse_width_idx_high: config.pulse_width_idx,
         pulse_mode: 0,
         cell_mode: config.cell_mode,
         channel_mask: drx_channel_mask(config),
         scan_mode,
         pad0: 0,
+        pad1: 0,
         trigger_delay_0: trigger_us_to_cycles(config.trigger_delay_0, trigger_fs_hz),
         trigger_delay_1: trigger_us_to_cycles(config.trigger_delay_1, trigger_fs_hz),
         trigger_delay_2: trigger_us_to_cycles(config.trigger_delay_2, trigger_fs_hz),
@@ -2109,11 +2123,16 @@ mod tests {
             ..config_with_thresholds(3.0, 0.0, -100.0)
         };
         let drx_config = build_drx_config(&config, 250.0e6).expect("doppler_cut es resoluble");
-        let (seq, range_bins, prf_div, pulse_width_idx, cell_mode) = (
+        let (seq, range_bins_low, range_bins_high, prf_div_low, prf_div_high) = (
             drx_config.seq,
-            drx_config.range_bins,
-            drx_config.prf_div,
-            drx_config.pulse_width_idx,
+            drx_config.range_bins_low,
+            drx_config.range_bins_high,
+            drx_config.prf_div_low,
+            drx_config.prf_div_high,
+        );
+        let (pulse_width_idx_low, pulse_width_idx_high, cell_mode) = (
+            drx_config.pulse_width_idx_low,
+            drx_config.pulse_width_idx_high,
             drx_config.cell_mode,
         );
         let (channel_mask, scan_mode, pulse_mode, delay_0, width_0) = (
@@ -2124,9 +2143,13 @@ mod tests {
             drx_config.trigger_width_0,
         );
         assert_eq!(seq, 9);
-        assert_eq!(range_bins, 500);
-        assert_eq!(prf_div, 40);
-        assert_eq!(pulse_width_idx, 3);
+        // `high` copia `low`: el RCP aún no expone un segundo lote (P-15).
+        assert_eq!(range_bins_low, 500);
+        assert_eq!(range_bins_high, 500);
+        assert_eq!(prf_div_low, 40);
+        assert_eq!(prf_div_high, 40);
+        assert_eq!(pulse_width_idx_low, 3);
+        assert_eq!(pulse_width_idx_high, 3);
         assert_eq!(cell_mode, 1);
         assert_eq!(channel_mask, channel::RX_0 | channel::TX_BURST_0);
         assert_eq!(scan_mode, 2);

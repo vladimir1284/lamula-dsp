@@ -87,14 +87,20 @@ EXPECTED_STATUS = [
 
 EXPECTED_CONFIG = [
     ("seq", "u32"),
-    ("prf_div", "u32"),
-    ("range_bins", "u16"),
-    ("pulse_width_idx", "u8"),
+    ("prf_div_low", "u32"),
+    ("prf_div_high", "u32"),
+    ("range_bins_low", "u16"),
+    ("range_bins_high", "u16"),
+    ("n_pulses_low", "u16"),
+    ("n_pulses_high", "u16"),
+    ("pulse_width_idx_low", "u8"),
+    ("pulse_width_idx_high", "u8"),
     ("pulse_mode", "u8"),
     ("cell_mode", "u8"),
     ("channel_mask", "u8"),
     ("scan_mode", "u8"),
     ("pad0", "u8"),
+    ("pad1", "u8"),
     ("trigger_delay_0", "u32"),
     ("trigger_delay_1", "u32"),
     ("trigger_delay_2", "u32"),
@@ -103,6 +109,13 @@ EXPECTED_CONFIG = [
     ("trigger_width_1", "u32"),
     ("trigger_width_2", "u32"),
     ("trigger_width_3", "u32"),
+]
+
+EXPECTED_TEST_STIMULUS_SELECT = [
+    ("seq", "u32"),
+    ("vector_id", "u8"),
+    ("pad0", "u8"),
+    ("repeat", "u16"),
 ]
 
 EXPECTED_CONFIG_ACK = [
@@ -124,9 +137,10 @@ EXPECTED_SIZES = {
     "Header": 12,
     "Ray": 36,
     "Status": 28,
-    "Config": 48,
+    "Config": 60,
     "ConfigAck": 8,
     "Afc": 16,
+    "TestStimulusSelect": 8,
 }
 
 MESSAGES = {
@@ -136,13 +150,14 @@ MESSAGES = {
     "Config": EXPECTED_CONFIG,
     "ConfigAck": EXPECTED_CONFIG_ACK,
     "Afc": EXPECTED_AFC,
+    "TestStimulusSelect": EXPECTED_TEST_STIMULUS_SELECT,
 }
 
 # Constantes de identidad del contrato. `magic` es "LMDR" en ASCII
 # little-endian; que coincida es lo primero que mira el ingestor antes de
 # fiarse de un byte del flujo.
 EXPECTED_MAGIC = 0x4C4D4452
-EXPECTED_VERSION = (0, 4)
+EXPECTED_VERSION = (0, 6)
 
 # Identificadores de mensaje. El sentido va anotado porque el DSP sólo debe
 # emitir los "down" y sólo debe aceptar los "up": un identificador que cambiara
@@ -153,6 +168,7 @@ EXPECTED_MSG_TYPES = {
     "CONFIG": (3, "down"),
     "CONFIG_ACK": (4, "up"),
     "AFC": (5, "down"),
+    "TEST_STIMULUS_SELECT": (6, "down"),
 }
 
 

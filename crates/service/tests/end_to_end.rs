@@ -133,22 +133,28 @@ async fn read_drx_config(stream: &mut TcpStream) -> drx_dsp::Config {
     stream.read_exact(&mut body).await.unwrap();
     drx_dsp::Config {
         seq: u32::from_le_bytes(body[0..4].try_into().unwrap()),
-        prf_div: u32::from_le_bytes(body[4..8].try_into().unwrap()),
-        range_bins: u16::from_le_bytes(body[8..10].try_into().unwrap()),
-        pulse_width_idx: body[10],
-        pulse_mode: body[11],
-        cell_mode: body[12],
-        channel_mask: body[13],
-        scan_mode: body[14],
-        pad0: body[15],
-        trigger_delay_0: u32::from_le_bytes(body[16..20].try_into().unwrap()),
-        trigger_delay_1: u32::from_le_bytes(body[20..24].try_into().unwrap()),
-        trigger_delay_2: u32::from_le_bytes(body[24..28].try_into().unwrap()),
-        trigger_delay_3: u32::from_le_bytes(body[28..32].try_into().unwrap()),
-        trigger_width_0: u32::from_le_bytes(body[32..36].try_into().unwrap()),
-        trigger_width_1: u32::from_le_bytes(body[36..40].try_into().unwrap()),
-        trigger_width_2: u32::from_le_bytes(body[40..44].try_into().unwrap()),
-        trigger_width_3: u32::from_le_bytes(body[44..48].try_into().unwrap()),
+        prf_div_low: u32::from_le_bytes(body[4..8].try_into().unwrap()),
+        prf_div_high: u32::from_le_bytes(body[8..12].try_into().unwrap()),
+        range_bins_low: u16::from_le_bytes(body[12..14].try_into().unwrap()),
+        range_bins_high: u16::from_le_bytes(body[14..16].try_into().unwrap()),
+        n_pulses_low: u16::from_le_bytes(body[16..18].try_into().unwrap()),
+        n_pulses_high: u16::from_le_bytes(body[18..20].try_into().unwrap()),
+        pulse_width_idx_low: body[20],
+        pulse_width_idx_high: body[21],
+        pulse_mode: body[22],
+        cell_mode: body[23],
+        channel_mask: body[24],
+        scan_mode: body[25],
+        pad0: body[26],
+        pad1: body[27],
+        trigger_delay_0: u32::from_le_bytes(body[28..32].try_into().unwrap()),
+        trigger_delay_1: u32::from_le_bytes(body[32..36].try_into().unwrap()),
+        trigger_delay_2: u32::from_le_bytes(body[36..40].try_into().unwrap()),
+        trigger_delay_3: u32::from_le_bytes(body[40..44].try_into().unwrap()),
+        trigger_width_0: u32::from_le_bytes(body[44..48].try_into().unwrap()),
+        trigger_width_1: u32::from_le_bytes(body[48..52].try_into().unwrap()),
+        trigger_width_2: u32::from_le_bytes(body[52..56].try_into().unwrap()),
+        trigger_width_3: u32::from_le_bytes(body[56..60].try_into().unwrap()),
     }
 }
 
@@ -259,11 +265,16 @@ async fn service_binary_wires_drx_to_rcp() {
     let drx_config = read_drx_config(&mut drx).await;
     // Copias locales: `drx_dsp::Config` es `packed`, tomar referencia a un
     // campo directamente (lo que hace `assert_eq!` por dentro) es UB.
-    let (seq, range_bins, prf_div, pulse_width_idx, pulse_mode, cell_mode) = (
+    let (seq, range_bins_low, range_bins_high, prf_div_low, prf_div_high) = (
         drx_config.seq,
-        drx_config.range_bins,
-        drx_config.prf_div,
-        drx_config.pulse_width_idx,
+        drx_config.range_bins_low,
+        drx_config.range_bins_high,
+        drx_config.prf_div_low,
+        drx_config.prf_div_high,
+    );
+    let (pulse_width_idx_low, pulse_width_idx_high, pulse_mode, cell_mode) = (
+        drx_config.pulse_width_idx_low,
+        drx_config.pulse_width_idx_high,
         drx_config.pulse_mode,
         drx_config.cell_mode,
     );
@@ -281,9 +292,13 @@ async fn service_binary_wires_drx_to_rcp() {
         config.cell_mode,
     );
     assert_eq!(seq, want_seq);
-    assert_eq!(range_bins, want_n_gates);
-    assert_eq!(prf_div, want_prf_div);
-    assert_eq!(pulse_width_idx, want_pulse_width_idx);
+    // `high` copia `low`: el RCP aún no expone un segundo lote (P-15).
+    assert_eq!(range_bins_low, want_n_gates);
+    assert_eq!(range_bins_high, want_n_gates);
+    assert_eq!(prf_div_low, want_prf_div);
+    assert_eq!(prf_div_high, want_prf_div);
+    assert_eq!(pulse_width_idx_low, want_pulse_width_idx);
+    assert_eq!(pulse_width_idx_high, want_pulse_width_idx);
     assert_eq!(pulse_mode, 0);
     assert_eq!(cell_mode, want_cell_mode);
     assert_eq!(

@@ -54,7 +54,7 @@ macro_rules! check_layout {
 fn drx_identidad() {
     assert_eq!(drx_dsp::MAGIC, 0x4C4D_4452, "magic no es \"LMDR\"");
     assert_eq!(drx_dsp::VERSION_MAJOR, 0);
-    assert_eq!(drx_dsp::VERSION_MINOR, 4);
+    assert_eq!(drx_dsp::VERSION_MINOR, 6);
 }
 
 #[test]
@@ -64,6 +64,7 @@ fn drx_tipos_de_mensaje() {
     assert_eq!(drx_dsp::MsgType::Config as u8, 3);
     assert_eq!(drx_dsp::MsgType::ConfigAck as u8, 4);
     assert_eq!(drx_dsp::MsgType::Afc as u8, 5);
+    assert_eq!(drx_dsp::MsgType::TestStimulusSelect as u8, 6);
 }
 
 #[test]
@@ -101,14 +102,25 @@ fn drx_status() {
 #[test]
 fn drx_config() {
     check_layout!(
-        drx_dsp::Config, 48,
-        seq: 4, prf_div: 4, range_bins: 2, pulse_width_idx: 1, pulse_mode: 1,
-        cell_mode: 1, channel_mask: 1, scan_mode: 1, pad0: 1,
+        drx_dsp::Config, 60,
+        seq: 4, prf_div_low: 4, prf_div_high: 4, range_bins_low: 2,
+        range_bins_high: 2, n_pulses_low: 2, n_pulses_high: 2,
+        pulse_width_idx_low: 1, pulse_width_idx_high: 1, pulse_mode: 1,
+        cell_mode: 1, channel_mask: 1, scan_mode: 1, pad0: 1, pad1: 1,
         trigger_delay_0: 4, trigger_delay_1: 4, trigger_delay_2: 4,
         trigger_delay_3: 4, trigger_width_0: 4, trigger_width_1: 4,
         trigger_width_2: 4, trigger_width_3: 4,
     );
-    assert_eq!(drx_dsp::CONFIG_SIZE, 48);
+    assert_eq!(drx_dsp::CONFIG_SIZE, 60);
+}
+
+#[test]
+fn drx_test_stimulus_select() {
+    check_layout!(
+        drx_dsp::TestStimulusSelect, 8,
+        seq: 4, vector_id: 1, pad0: 1, repeat: 2,
+    );
+    assert_eq!(drx_dsp::TEST_STIMULUS_SELECT_SIZE, 8);
 }
 
 #[test]
