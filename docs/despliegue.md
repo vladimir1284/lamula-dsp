@@ -82,6 +82,10 @@ resumen:
 
 ## Lo que sigue pendiente
 
+- **Signo del NCO del AFC en la ZU9**: el lazo cierra sobre la ZedBoard con `NCO = rx_if − freq`
+  (mezclador conjugado), pero no se ha medido en la ZU9. Si allí el signo es el contrario, el cambio
+  es una línea en `crates/service/src/main.rs`. Procedimiento en `P-24` del proyecto DRx
+  (`docs/alcance/pendientes.md`).
 - **Instalador real** (paquete `.deb`/`.rpm`/imagen de SBC, no sólo los tres
   ficheros de `packaging/`): no existe todavía.
 - **Cross-compilación ARM**: fuera de alcance hasta que Fase 0 decida la
