@@ -195,7 +195,7 @@ fn packed_ray_round_trips_header_fields() {
         assert_eq!(msg_type, 1, "MsgType::Ray");
 
         let declared_payload_len = u32::from_le_bytes(frame[8..12].try_into().unwrap());
-        assert_eq!(declared_payload_len as usize, payload_len);
+        assert_eq!(declared_payload_len as usize, RAY_SIZE + payload_len);
 
         let seq = u32::from_le_bytes(frame[12..16].try_into().unwrap());
         assert_eq!(seq, fields.seq_start.wrapping_add(i as u32));

@@ -71,8 +71,10 @@ impl AfcLoop {
     /// `bite` se marca. En caso contrario mide la frecuencia del burst y
     /// avanza el filtro de primer orden `freq_hz += gain·(f_meas - freq_hz)`.
     pub fn update(&mut self, burst: &[Complex64]) -> AfcUpdate {
-        let mean: Complex64 = burst.iter().sum::<Complex64>() / burst.len() as f64;
-        let amp_meas = mean.norm();
+        // Amplitud no coherente: la media compleja se anula en un burst
+        // desplazado de la IF (p. ej. 0,25 ciclos/muestra con N=4) y
+        // congelaría el lazo justo cuando hay que corregir.
+        let amp_meas = burst.iter().map(|z| z.norm()).sum::<f64>() / burst.len() as f64;
 
         if amp_meas < self.amp_threshold {
             return AfcUpdate {
@@ -86,6 +88,35 @@ impl AfcLoop {
         let f_meas = burst_freq_estimate(burst, self.dt_fast_s);
         self.freq_meas_hz = f_meas;
         self.freq_hz += self.gain * (f_meas - self.freq_hz);
+        AfcUpdate {
+            freq_hz: self.freq_hz,
+            freq_meas_hz: self.freq_meas_hz,
+            amplitude: amp_meas,
+            bite: false,
+        }
+    }
+
+    /// Igual que [`AfcLoop::update`], para un burst medido DESPUÉS de la
+    /// corrección que el lazo ya aplicó al NCO (lazo cerrado: el burst pasa
+    /// por el mismo DDC retunado). La frecuencia medida es entonces el
+    /// residuo; la absoluta es `residuo + freq_hz`. Filtrar el residuo como
+    /// si fuera absoluto deja el punto fijo en la mitad del desvío
+    /// (`x = (d - x)`, `x = d/2`); con la absoluta el punto fijo es `d`.
+    /// `AfcUpdate::freq_meas_hz` reporta la frecuencia absoluta.
+    pub fn update_residual(&mut self, burst: &[Complex64]) -> AfcUpdate {
+        let applied = self.freq_hz;
+        let amp_meas = burst.iter().map(|z| z.norm()).sum::<f64>() / burst.len() as f64;
+        if amp_meas < self.amp_threshold {
+            return AfcUpdate {
+                freq_hz: self.freq_hz,
+                freq_meas_hz: self.freq_meas_hz,
+                amplitude: amp_meas,
+                bite: true,
+            };
+        }
+        let f_abs = burst_freq_estimate(burst, self.dt_fast_s) + applied;
+        self.freq_meas_hz = f_abs;
+        self.freq_hz += self.gain * (f_abs - self.freq_hz);
         AfcUpdate {
             freq_hz: self.freq_hz,
             freq_meas_hz: self.freq_meas_hz,
@@ -183,5 +214,76 @@ mod tests {
         let during = loop_.update(&weak);
         assert!(during.bite);
         assert_eq!(during.freq_hz, before.freq_hz);
+    }
+
+    #[test]
+    fn closed_loop_residual_update_converges_to_the_full_offset() {
+        // Tono de d Hz; el NCO retunado resta lo ya aplicado. `update` se
+        // queda en d/2; `update_residual` converge a d.
+        let dt = 1e-6;
+        let d = 60e3;
+        let tone = |resid: f64| -> Vec<Complex64> {
+            (0..8)
+                .map(|n| Complex64::from_polar(0.5, 2.0 * std::f64::consts::PI * resid * dt * n as f64))
+                .collect()
+        };
+        let mut open = AfcLoop::new(0.2, 0.01, dt);
+        let mut closed = AfcLoop::new(0.2, 0.01, dt);
+        for _ in 0..200 {
+            let r = d - open.freq_hz();
+            open.update(&tone(r));
+            let r = d - closed.freq_hz();
+            closed.update_residual(&tone(r));
+        }
+        assert!((open.freq_hz() - d / 2.0).abs() < 50.0);
+        assert!((closed.freq_hz() - d).abs() < 50.0);
+    }
+
+    #[test]
+    fn nco_word_for_15_mhz_at_62_5_msps_is_the_absolute_nominal() {
+        // Valor medido en la ZedBoard: palabra absoluta de 32 bits que
+        // centra el pico del burst en continua.
+        assert_eq!(nco_phase_inc_for_freq_offset(15e6, 62.5e6, 32), 1_030_792_151);
+    }
+
+    #[test]
+    fn nco_word_rises_for_a_negative_burst_offset() {
+        // Mezclador conjugado: subir la palabra sube el pico, así que el
+        // servicio manda `rx_if - freq`. Un burst a −62,5 kHz (freq < 0)
+        // pide una palabra MAYOR que la nominal.
+        let nominal = nco_phase_inc_for_freq_offset(15e6, 62.5e6, 32);
+        let tuned = nco_phase_inc_for_freq_offset(15e6 - (-62_500.0), 62.5e6, 32);
+        assert!(tuned > nominal);
+    }
+
+    #[test]
+    fn closed_loop_with_time_dilation_converges_at_the_dilated_sample_rate() {
+        // ZedBoard dilatada ×4: fs_dec ≈ 150,5 kHz, el desvío de −62,5 kHz
+        // cae dentro del rango de captura ±fs_dec/2 y el lazo lo alcanza.
+        let dt = 1.0 / 150_500.0;
+        let d = -62_500.0;
+        let tone = |resid: f64| -> Vec<Complex64> {
+            (0..4)
+                .map(|n| Complex64::from_polar(0.35, 2.0 * std::f64::consts::PI * resid * dt * n as f64))
+                .collect()
+        };
+        let mut afc = AfcLoop::new(0.035, 0.01, dt);
+        for _ in 0..400 {
+            let r = d - afc.freq_hz();
+            afc.update_residual(&tone(r));
+        }
+        assert!((afc.freq_hz() - d).abs() < 100.0);
+    }
+
+    #[test]
+    fn offset_tone_with_vanishing_coherent_sum_is_not_flagged_as_low_amplitude() {
+        // 0,25 ciclos/muestra, N=4: la suma coherente es exactamente 0.
+        let burst: Vec<Complex64> = (0..4)
+            .map(|n| Complex64::from_polar(0.5, std::f64::consts::FRAC_PI_2 * n as f64))
+            .collect();
+        let mut afc = AfcLoop::new(1.0, 0.01, 1e-6);
+        let u = afc.update(&burst);
+        assert!(!u.bite);
+        assert!((u.amplitude - 0.5).abs() < 1e-12);
     }
 }

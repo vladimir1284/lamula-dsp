@@ -10,22 +10,24 @@ es **quién manda**.
 | `DRx↔DSP` v0.4 | Proyecto LAMULA DRx | `contract/schema/drx_dsp_v0_1.toml` del repositorio del DRx | C (DRx), Rust (DSP), Python (pruebas) |
 | `DSP↔RCP` v1.9 | **Este proyecto** | `contract/schema/dsp_rcp_v0_1.toml` | Rust (DSP), Python (RCP), TypeScript (MMI) |
 
-## Quién abre el socket: el productor conecta
+## Quién abre el socket
 
-Ningún esquema dice nada de sockets — los dos definen bytes, no transporte. La
-regla de despliegue de la cadena, en cambio, sí es única y vale para los dos
-enlaces: **el productor conecta y el consumidor escucha.**
+Ningún esquema dice nada de sockets —los dos definen bytes, no transporte—,
+salvo el puerto del `DRx↔DSP` (`TCP_PORT` = 9470, desde v0.8). **Los dos enlaces
+tienen el DSP como cliente:**
 
 | Enlace | Escucha | Conecta |
 | --- | --- | --- |
-| `DRx↔DSP` | DSP (`LAMULA_DSP_DRX_ADDR`) | DRx |
+| `DRx↔DSP` | DRx (puerto 9470) | DSP (`LAMULA_DSP_DRX_ADDR`) |
 | `DSP↔RCP` | RCP (`--dsp-port` de su gateway, 15551 por defecto) | DSP (`LAMULA_DSP_RCP_ADDR`) |
 
-El motivo es operativo, no estético: en los dos casos el consumidor está
-levantado de forma permanente y el productor es el que arranca, se reinicia o
-se reconfigura. Con esta regla la lógica de reconexión vive en un solo lado de
-cada enlace —el que se cae— y el consumidor no necesita saber cuándo volverá su
-par.
+`DRx↔DSP` lo decidió el proyecto DRx en su D-16 (2-oct-2026) y está medido en
+placa: una sola conexión TCP para los dos sentidos, el receptor no necesita
+conocer la dirección del DSP, y el DSP puede reiniciarse y reconectar sin tocar
+la placa. Esto **sustituye** la regla anterior de este repo, "el productor
+conecta", para ese enlace; `DSP↔RCP` la conserva porque el RCP es permanente.
+La reconexión vive en el DSP en los dos casos (`lamula_ingest::tcp`,
+`lamula_rcp_link::tcp`), con un reintento cada segundo.
 
 Cuidado con una lectura que ya causó un desencuentro real entre repositorios:
 «the RCP is the sole client» (`dsp-plan.md` §12) describe el **rol

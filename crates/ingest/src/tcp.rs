@@ -1,27 +1,31 @@
 //! Adapter AAL real sobre TCP.
 //!
-//! El DSP escucha (servidor) y el DRx conecta como cliente, por la regla de
-//! despliegue "el productor conecta" que gobierna los dos enlaces de la
-//! cadena (ver `docs/contracts/index.md` §"Quién abre el socket"). El
-//! contrato `DRx↔DSP` sólo define bytes, no semántica de socket, así que la
-//! regla vive en el despliegue y no en el esquema. Este lado ya la cumple y
-//! no cambia; lo que falta es que el firmware del DRx, cuando exista
-//! (su fase Z4.2), conecte en vez de escuchar.
+//! El DRx escucha (servidor, puerto `lamula_contract::drx_dsp::TCP_PORT`) y el
+//! DSP conecta como cliente: es [D-16] del proyecto DRx, medido en placa en su
+//! fase Z4.6 (una sola conexión para los dos sentidos). Esto invierte la regla
+//! "el productor conecta" con la que este adapter nació, y el motivo está en
+//! D-16: el receptor no tiene que conocer la dirección del DSP, y el DSP
+//! puede reiniciarse y reconectar sin tocar la placa. El contrato `DRx↔DSP`
+//! sólo define bytes, no semántica de socket, así que la regla vive en el
+//! despliegue y no en el esquema. `DSP↔RCP` no cambia.
+//!
+//! [D-16]: https://lamula-drx-docs.pages.dev/alcance/decisiones/#d-16
 //!
 //! El framing usa `Header.payload_len`: se lee la cabecera de 12 B, se
-//! calcula el resto de la trama (`RAY_SIZE + payload_len`) y se lee esa
-//! cantidad exacta antes de decodificar — necesario porque TCP no preserva
+//! lee exactamente `payload_len` bytes más (el struct `ray` y su carga: el
+//! esquema cuenta todo lo que sigue a la cabecera) antes de decodificar — necesario porque TCP no preserva
 //! límites de mensaje.
 //!
-//! Reconecta: un cierre limpio del DRx (EOF entre tramas) vuelve a
-//! `listener.accept()` y sigue mandando por el mismo canal `frames`, en vez
-//! de terminar la tarea. Un error real de socket (reset, EOF a mitad de
-//! trama, io error) sí termina la tarea y cierra `frames` — quien llame debe
-//! tratar eso como fallo fatal de este componente, no como una desconexión
-//! normal. El `RadialAssembler` no se resetea al reconectar: si el DRx corta
-//! a mitad de un radial, la próxima trama tras la reconexión se sigue
-//! alimentando al ensamblador que ya tenía en curso; esto puede producir un
-//! radial corrupto — no hay lógica de resincronización en este workspace.
+//! Reconecta: el DSP es el cliente, así que cualquier fin de conexión —cierre
+//! limpio, reset, EOF a mitad de trama, reinicio de la placa— es un evento
+//! normal de operación y no un fallo de este componente: se espera
+//! [`RECONNECT_DELAY`] y se vuelve a conectar, igual que hace `lamula_rcp_link`
+//! hacia el RCP. Un `connect` que falla (DRx todavía arrancando) también
+//! reintenta. La tarea sólo termina cuando el consumidor suelta `frames`. El
+//! `RadialAssembler` no se resetea al reconectar: si el DRx corta a mitad de
+//! un radial, la próxima trama tras la reconexión se sigue alimentando al
+//! ensamblador que ya tenía en curso; esto puede producir un radial corrupto —
+//! no hay lógica de resincronización en este workspace.
 //!
 //! Una trama cuyos bytes se leen completos pero que `decode_ray_frame`
 //! rechaza (`BadMagic`/`UnsupportedVersion`/`UnexpectedMsgType`/`Truncated`)
@@ -30,35 +34,36 @@
 //! `docs/dsp-plan.md` §"fault injection ... for BITE testing" de punta a
 //! punta sin reconectar a mano). Se cuenta en `malformed_frames` y se sigue
 //! leyendo la próxima cabecera: el `read_exact` de arriba ya consumió del
-//! socket exactamente `HEADER_SIZE + RAY_SIZE + payload_len` bytes según el
+//! socket exactamente `HEADER_SIZE + payload_len` bytes según el
 //! propio encabezado de esa trama, así que la sincronía de bytes para la
 //! siguiente trama no se pierde — salvo que la propia corrupción haya caído
 //! sobre `payload_len` (`FrameFault::PayloadLenTooLarge` en
 //! `lamula_simulator::fault`), caso que este adapter no intenta resincronizar
 //! (exigiría buscar `MAGIC` byte a byte en el flujo) y que sigue sin cubrir.
 //!
-//! **Camino de escritura (`Afc`, sentido `down`).** El socket aceptado se
+//! **Camino de escritura (`Afc`, sentido `down`).** El socket conectado se
 //! parte en mitad de lectura y mitad de escritura (`TcpStream::into_split`):
 //! la mitad de lectura sigue el bucle de arriba; la mitad de escritura la
 //! posee una tarea aparte que drena `IngestSource::afc` y le escribe
 //! [`crate::wire::encode_afc_frame`] tal cual llega. Las dos tareas comparten
 //! cuál es la mitad de escritura *vigente* a través de un
-//! `Arc<Mutex<Option<OwnedWriteHalf>>>` actualizado en cada `accept()` (y
+//! `Arc<Mutex<Option<OwnedWriteHalf>>>` actualizado en cada conexión (y
 //! puesto a `None` al reconectar) porque el ciclo de vida de la escritura no
 //! sigue al bucle de lectura: una corrección de AFC puede necesitar salir
 //! aunque no haya llegado ningún `Ray` nuevo entretanto (el lazo de AFC
 //! corre a la cadencia de rayo, no a la de esta tarea). Sin conexión
-//! aceptada todavía, o tras un error de escritura, la corrección en curso se
+//! establecida todavía, o tras un error de escritura, la corrección en curso se
 //! descarta — no hay cola de reintento; la próxima actualización del lazo de
 //! AFC (`docs/algorithms/burst-fase-afc.md` §"Lazo de AFC") la reemplaza.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use lamula_contract::drx_dsp::{Afc, Config, HEADER_SIZE, RAY_SIZE};
+use lamula_contract::drx_dsp::{Afc, Config, HEADER_SIZE};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::tcp::OwnedWriteHalf;
-use tokio::net::{TcpListener, ToSocketAddrs};
+use tokio::net::TcpStream;
 use tokio::sync::{mpsc, Mutex};
 use tokio::task::JoinHandle;
 
@@ -66,18 +71,16 @@ use crate::error::IngestError;
 use crate::wire::{decode_ray_frame, encode_afc_frame, encode_config_frame};
 use crate::IngestSource;
 
-/// Escucha en `addr`. Separado de [`spawn`] para que quien llama pueda leer
-/// el puerto real cuando `addr` pide el puerto 0 (típico en tests).
-pub async fn bind(addr: impl ToSocketAddrs) -> Result<TcpListener, IngestError> {
-    Ok(TcpListener::bind(addr).await?)
-}
+/// Espera entre intentos de conexión al DRx.
+pub const RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
-/// Acepta conexiones sobre `listener`, una detrás de otra, decodifica cada
-/// trama `Ray` que llegue, y manda hacia el DRx cada `Afc` que llegue por
-/// `IngestSource::afc`. `full_scale_counts` como en
-/// `crate::wire::decode_ray_frame`. Ver el doc del módulo para la semántica
-/// de reconexión y de la mitad de escritura.
-pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> IngestSource {
+/// Conecta a `addr` (el DRx), una y otra vez mientras haga falta, decodifica
+/// cada trama `Ray` que llegue, y manda hacia el DRx cada `Afc`/`Config` que
+/// llegue por `IngestSource::afc`/`IngestSource::drx_config`.
+/// `full_scale_counts` como en `crate::wire::decode_ray_frame`. Ver el doc del
+/// módulo para la semántica de reconexión y de la mitad de escritura.
+pub fn spawn(addr: impl Into<String>, full_scale_counts: i16, capacity: usize) -> IngestSource {
+    let addr = addr.into();
     let (tx, rx) = mpsc::channel(capacity);
     let (afc_tx, mut afc_rx) = mpsc::channel::<Afc>(capacity);
     let (drx_config_tx, mut drx_config_rx) = mpsc::channel::<Config>(capacity);
@@ -132,31 +135,43 @@ pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> 
         let malformed_frames = Arc::clone(&malformed_frames);
         tokio::spawn(async move {
             loop {
-                let (socket, _peer) = listener.accept().await?;
+                let socket = match TcpStream::connect(&addr).await {
+                    Ok(socket) => socket,
+                    // El DRx todavía no escucha (arrancando o reiniciándose).
+                    Err(e) => {
+                        eprintln!(
+                            "DRx en {addr} no acepta conexión ({e}); reintento en {RECONNECT_DELAY:?}"
+                        );
+                        tokio::time::sleep(RECONNECT_DELAY).await;
+                        continue;
+                    }
+                };
+                // `afc` y `config` son tramas pequeñas con latencia que
+                // importa; Nagle las retendría detrás de ACKs de un flujo de
+                // rayos que va en sentido contrario.
+                let _ = socket.set_nodelay(true);
                 let (mut read_half, w) = socket.into_split();
                 *write_half.lock().await = Some(w);
                 loop {
                     let mut header = [0u8; HEADER_SIZE];
                     match read_half.read_exact(&mut header).await {
                         Ok(_) => {}
-                        // Cierre limpio del otro lado justo entre tramas: fin
-                        // de esta conexión, no un fallo — vuelve a esperar la
-                        // próxima. Cualquier otro error (reset, timeout, EOF a
-                        // mitad de cabecera) se propaga: no se traga un fallo
-                        // real de socket como si fuera un cierre limpio.
-                        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                        // Cualquier fin de conexión —limpio o no— es un evento
+                        // normal con el DSP de lado cliente: se reconecta.
                         Err(e) => {
-                            *write_half.lock().await = None;
-                            return Err(e.into());
+                            if e.kind() != std::io::ErrorKind::UnexpectedEof {
+                                eprintln!("enlace con el DRx en {addr} caído ({e})");
+                            }
+                            break;
                         }
                     }
                     let payload_len =
                         u32::from_le_bytes(header[8..12].try_into().unwrap()) as usize;
 
-                    let mut rest = vec![0u8; RAY_SIZE + payload_len];
+                    let mut rest = vec![0u8; payload_len];
                     if let Err(e) = read_half.read_exact(&mut rest).await {
-                        *write_half.lock().await = None;
-                        return Err(e.into());
+                        eprintln!("enlace con el DRx en {addr} caído a mitad de trama ({e})");
+                        break;
                     }
 
                     let mut full_frame = Vec::with_capacity(HEADER_SIZE + rest.len());
@@ -175,6 +190,7 @@ pub fn spawn(listener: TcpListener, full_scale_counts: i16, capacity: usize) -> 
                     }
                 }
                 *write_half.lock().await = None;
+                tokio::time::sleep(RECONNECT_DELAY).await;
             }
         })
     };

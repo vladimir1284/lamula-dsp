@@ -13,9 +13,8 @@
 //! RCP sigue siendo el único par de este enlace.
 //!
 //! El framing es uniforme para los diez tipos de mensaje: 12 B de cabecera
-//! común, luego `payload_len` bytes más (ver `crate::wire`). Eso evita el
-//! `RAY_SIZE` especial que necesita `lamula_ingest::tcp` para el contrato
-//! `DRx↔DSP`, donde `payload_len` no cuenta la cabecera del mensaje.
+//! común, luego `payload_len` bytes más (ver `crate::wire`). Es el mismo
+//! framing que usa `lamula_ingest::tcp` para `DRx↔DSP`.
 //!
 //! Reconecta: al cerrarse una conexión (cierre limpio del lector, o error de
 //! escritura como `BrokenPipe`/`ConnectionReset` porque el RCP ya se fue)

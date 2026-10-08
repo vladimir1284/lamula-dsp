@@ -506,8 +506,12 @@ fn gate_quality(power_linear: f64, e: &PulsePairEstimate, config: &Config) -> Ga
     } else {
         f64::NEG_INFINITY
     };
-    let snr = if e.s_linear > 0.0 {
+    let snr = if e.s_linear > 0.0 && e.noise_floor_estimate > 0.0 {
         snr_db(e.s_linear, e.noise_floor_estimate)
+    } else if e.s_linear > 0.0 {
+        // Piso de ruido estimado exactamente cero (serie sin ruido, p. ej.
+        // celdas rellenas con ceros): SNR no acotada, no un panic.
+        f64::INFINITY
     } else {
         f64::NEG_INFINITY
     };
@@ -516,7 +520,11 @@ fn gate_quality(power_linear: f64, e: &PulsePairEstimate, config: &Config) -> Ga
     // receptor) — se guarda igual para no entrar en pánico ante ese caso
     // degenerado.
     let sqi_value = (e.r0_raw > 0.0).then(|| sqi(e.r0_raw, e.r1_abs));
-    let sig_value = sig_db(e.s_linear, e.noise_floor_estimate);
+    let sig_value = if e.noise_floor_estimate > 0.0 {
+        sig_db(e.s_linear, e.noise_floor_estimate)
+    } else {
+        None
+    };
 
     let censored = censored_by_sig_threshold(snr, config.sig_threshold as f64)
         || sqi_value.map_or(true, |v| v < config.sqi_threshold as f64)

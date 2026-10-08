@@ -1,4 +1,4 @@
-//! DRx de mentira: conecta al DSP y le escupe rayos sintéticos por el cable
+//! DRx de mentira: escucha, y cuando el DSP conecta le escupe rayos sintéticos por el cable
 //! `DRx↔DSP` real, a cadencia de PRF.
 //!
 //! Para qué existe: hasta ahora el pipeline sólo se había alimentado con
@@ -20,12 +20,12 @@
 //! Uso:
 //!
 //! ```sh
-//! cargo run --example drx_faker -- 127.0.0.1:5000 [radiales]
+//! cargo run --example drx_faker -- 0.0.0.0:9470 [radiales]
 //! ```
 //!
 //! Sin argumentos toma `LAMULA_DSP_DRX_ADDR` del entorno y emite sin parar.
-//! Reintenta la conexión mientras el DSP no esté levantado, por el mismo
-//! motivo que `lamula_rcp_link::tcp`: el productor es quien reintenta.
+//! Escucha, como la placa (D-16 del proyecto DRx): el DSP conecta, y si el DSP
+//! se cae el faker vuelve a esperar al siguiente sin reiniciarse.
 
 use std::env;
 use std::time::Duration;
@@ -34,7 +34,7 @@ use lamula_simulator::{generate_cell, pack_rays, CellParams, RayHeaderFields};
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tokio::io::AsyncWriteExt;
-use tokio::net::TcpStream;
+use tokio::net::TcpListener;
 
 /// Pulsos por radial. Mismo valor que usa el banco vertical del workspace.
 const M: usize = 64;
@@ -69,8 +69,11 @@ async fn main() {
             .unwrap_or_else(|_| panic!("el número de radiales no es un entero: {s}"))
     });
 
-    let mut socket = connect_with_retries(&addr).await;
-    println!("drx_faker: conectado a {addr}");
+    let listener = TcpListener::bind(&addr)
+        .await
+        .unwrap_or_else(|e| panic!("drx_faker: no se pudo escuchar en {addr}: {e}"));
+    println!("drx_faker: escuchando en {addr}");
+    let mut socket = accept_dsp(&listener).await;
 
     let mut rng = StdRng::seed_from_u64(2026);
     let mut radial: u64 = 0;
@@ -127,8 +130,8 @@ async fn main() {
 
         for frame in pack_rays(&fields, &[cells], FULL_SCALE) {
             if let Err(e) = socket.write_all(&frame).await {
-                eprintln!("drx_faker: enlace caído ({e}); reconectando");
-                socket = connect_with_retries(&addr).await;
+                eprintln!("drx_faker: enlace caído ({e}); esperando al DSP");
+                socket = accept_dsp(&listener).await;
                 break;
             }
         }
@@ -142,12 +145,15 @@ async fn main() {
     }
 }
 
-async fn connect_with_retries(addr: &str) -> TcpStream {
+async fn accept_dsp(listener: &TcpListener) -> tokio::net::TcpStream {
     loop {
-        match TcpStream::connect(addr).await {
-            Ok(socket) => return socket,
+        match listener.accept().await {
+            Ok((socket, peer)) => {
+                println!("drx_faker: DSP conectado desde {peer}");
+                return socket;
+            }
             Err(e) => {
-                eprintln!("drx_faker: {addr} no acepta conexión ({e}); reintento en 1 s");
+                eprintln!("drx_faker: accept falló ({e}); reintento en 1 s");
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }

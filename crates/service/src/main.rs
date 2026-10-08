@@ -192,14 +192,13 @@ async fn main() {
         std::process::exit(1);
     });
 
-    let drx_listener = lamula_ingest::tcp::bind(&cfg.drx_addr)
-        .await
-        .unwrap_or_else(|e| panic!("no se pudo escuchar DRx en {}: {e}", cfg.drx_addr));
-    println!("DRx (AAL) escuchando en {}", cfg.drx_addr);
-    let mut ingest = lamula_ingest::tcp::spawn(drx_listener, cfg.full_scale_counts, 16);
+    // El DRx escucha y el DSP conecta (D-16 del proyecto DRx): `drx_addr` es
+    // el destino, no una dirección de escucha. Como con el RCP, `spawn`
+    // reintenta por su cuenta y no se espera aquí a que la placa esté arriba.
+    println!("DRx (AAL): conectando a {}", cfg.drx_addr);
+    let mut ingest = lamula_ingest::tcp::spawn(cfg.drx_addr.clone(), cfg.full_scale_counts, 16);
 
-    // El DSP es el que conecta ("el productor conecta", ver el doc del módulo
-    // `lamula_rcp_link::tcp`): `rcp_addr` es el destino, no una dirección de
+    // Igual hacia el RCP (ver el doc del módulo `lamula_rcp_link::tcp`): `rcp_addr` es el destino, no una dirección de
     // escucha. No se espera aquí a que el RCP esté levantado — `spawn`
     // reintenta por su cuenta y el resto del servicio arranca igual.
     println!("RCP: conectando a {}", cfg.rcp_addr);
@@ -280,9 +279,17 @@ async fn main() {
                         counters.rays_out += 1;
                         if let Some(loop_) = afc_loop.as_mut() {
                             if let Some(burst) = ray::afc_burst_sample(&radial, cfg_snapshot) {
-                                let update = loop_.update(&burst);
+                                // El burst pasa por el DDC ya retunado: la medida es el residuo.
+                                let update = loop_.update_residual(&burst);
+                                // El contrato lleva la palabra de fase ABSOLUTA del NCO:
+                                // la frecuencia nominal (IF de recepcion) mas la correccion
+                                // del lazo. Enviar solo la correccion deja el NCO en
+                                // continua y la salida del DDC en cero (medido en placa).
+                                // El signo es `-`: el mezclador del DDC es conjugado (subir
+                                // la palabra del NCO sube el pico del espectro; medido en
+                                // placa), y `freq_hz` se mide con el signo de la salida.
                                 let nco_phase_inc = lamula_burst::nco_phase_inc_for_freq_offset(
-                                    update.freq_hz,
+                                    cfg.rx_if_hz - update.freq_hz,
                                     cfg.drx_nco_fs_hz,
                                     cfg.drx_nco_word_bits,
                                 );
@@ -445,7 +452,7 @@ async fn handle_down_message(
                     *afc_loop = Some(AfcLoop::new(
                         gain,
                         svc_cfg.afc_amp_threshold,
-                        ray::fast_time_dt_s(applied),
+                        ray::fast_time_dt_s(applied) * svc_cfg.fast_time_dilation,
                     ));
                 }
                 command::STOP | command::ENTER_SETUP => {

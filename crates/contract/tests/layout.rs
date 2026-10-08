@@ -47,14 +47,16 @@ macro_rules! check_layout {
 }
 
 // ---------------------------------------------------------------------------
-// DRx↔DSP v0.4 — vendorizado, congelado por D-08 del proyecto DRx.
+// DRx↔DSP v0.8 — vendorizado, congelado por D-08 del proyecto DRx.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn drx_identidad() {
     assert_eq!(drx_dsp::MAGIC, 0x4C4D_4452, "magic no es \"LMDR\"");
     assert_eq!(drx_dsp::VERSION_MAJOR, 0);
-    assert_eq!(drx_dsp::VERSION_MINOR, 6);
+    assert_eq!(drx_dsp::VERSION_MINOR, 8);
+    // Puerto del transporte (D-16): lo fija el esquema, no el despliegue.
+    assert_eq!(drx_dsp::TCP_PORT, 9470);
 }
 
 #[test]

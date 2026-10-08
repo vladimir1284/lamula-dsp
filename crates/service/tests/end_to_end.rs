@@ -1,5 +1,4 @@
-//! Prueba de humo del binario real: lo arranca como subproceso y le conecta
-//! un DRx y un RCP falsos por TCP, comprobando que el flujo de control
+//! Prueba de humo del binario real: lo arranca como subproceso y hace de DRx y de RCP falsos por TCP: los dos escuchan y el binario les conecta, comprobando que el flujo de control
 //! (`config` → `config_ack`, `start` → `config_ack`) y el de datos (radial
 //! del DRx → `moment_ray` al RCP) atraviesan el proceso completo — no sólo
 //! el ensamblado en memoria que ya cubre
@@ -8,7 +7,6 @@
 //! Mismas simplificaciones que ese test: un solo canal, sin barrido
 //! simulado, sólo UZ+V.
 
-use std::net::TcpListener as StdTcpListener;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
@@ -19,7 +17,6 @@ use rand::rngs::StdRng;
 use rand::SeedableRng;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::time::sleep;
 
 const FULL_SCALE: i16 = i16::MAX;
 
@@ -31,14 +28,6 @@ impl Drop for ChildGuard {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
-}
-
-fn free_port() -> u16 {
-    StdTcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port()
 }
 
 fn header_bytes(msg_type: MsgType, payload_len: u32) -> Vec<u8> {
@@ -158,23 +147,17 @@ async fn read_drx_config(stream: &mut TcpStream) -> drx_dsp::Config {
     }
 }
 
-async fn connect_with_retries(port: u16) -> TcpStream {
-    for _ in 0..150 {
-        if let Ok(s) = TcpStream::connect(("127.0.0.1", port)).await {
-            return s;
-        }
-        sleep(Duration::from_millis(20)).await;
-    }
-    panic!("no se pudo conectar a 127.0.0.1:{port}: el binario no arrancó a tiempo");
-}
-
 #[tokio::test]
 async fn service_binary_wires_drx_to_rcp() {
-    let drx_port = free_port();
-    // Este test hace de RCP, y el RCP es el servidor de su enlace ("el
-    // productor conecta"): escucha antes de arrancar el binario, que conecta
-    // hacia aquí. Se queda con el listener en vez de usar `free_port()` para
-    // no abrir una ventana entre elegir el puerto y ocuparlo.
+    // Este test hace de RCP y de DRx, que son los servidores de sus enlaces
+    // (el DRx por D-16, el RCP porque el DSP le conecta): escucha antes de
+    // arrancar el binario, que conecta hacia aquí. Se queda con los listeners
+    // en vez de elegir un puerto libre para no abrir una ventana entre elegir
+    // el puerto y ocuparlo.
+    let drx_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("no se pudo escuchar como DRx");
+    let drx_port = drx_listener.local_addr().unwrap().port();
     let rcp_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("no se pudo escuchar como RCP");
@@ -204,13 +187,15 @@ async fn service_binary_wires_drx_to_rcp() {
             .expect("no se pudo arrancar el binario del servicio"),
     );
 
-    // Mismo presupuesto de arranque que `connect_with_retries` (3 s): sin
-    // límite, un binario que no arranca colgaría el test en vez de fallarlo.
+    // Presupuesto de arranque de 3 s: sin límite, un binario que no arranca colgaría el test en vez de fallarlo.
     let (mut rcp, _rcp_peer) = tokio::time::timeout(Duration::from_secs(3), rcp_listener.accept())
         .await
         .expect("el binario del servicio no conectó al RCP a tiempo")
         .expect("accept falló");
-    let mut drx = connect_with_retries(drx_port).await;
+    let (mut drx, _drx_peer) = tokio::time::timeout(Duration::from_secs(3), drx_listener.accept())
+        .await
+        .expect("el binario del servicio no conectó al DRx a tiempo")
+        .expect("accept falló");
 
     let config = Config {
         seq: 1,

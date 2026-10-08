@@ -72,11 +72,12 @@ resumen:
 
 | Variable | Qué es | Por qué no tiene default |
 | --- | --- | --- |
-| `LAMULA_DSP_DRX_ADDR` | Dirección donde el DSP **escucha** al DRx (el DRx conecta) | Direccionamiento de red, específico de instalación |
+| `LAMULA_DSP_DRX_ADDR` | Dirección del DRx a la que el DSP **conecta** (el DRx escucha, D-16 del proyecto DRx); el puerto es `TCP_PORT` del contrato, 9470. No es dirección de escucha: `0.0.0.0` no vale aquí | Direccionamiento de red, específico de instalación |
 | `LAMULA_DSP_RCP_ADDR` | Dirección del RCP a la que el DSP **conecta** (regla "el productor conecta"); el puerto es el `--dsp-port` del gateway del RCP, 15551 por defecto. No es dirección de escucha: `0.0.0.0` no vale aquí | Direccionamiento de red, específico de instalación |
 | `LAMULA_DSP_FULL_SCALE_COUNTS` | Cuenta ADC de amplitud unitaria | Convención de cuantización sin calibración real confirmada (`crates/ingest::wire`) |
 | `LAMULA_DSP_SSI_COUNTS_PER_TURN` / `LAMULA_DSP_SSI_ZERO_OFFSET_DEG` | Resolución y cero del encoder SSI | Sin documentar en este repositorio (`crates/ingest::angle`) |
-| `LAMULA_DSP_DRX_NCO_FS_HZ` / `LAMULA_DSP_DRX_NCO_WORD_BITS` | Reloj de referencia y anchura del acumulador de fase del NCO de recepción del DRx | Ni `DRx↔DSP` ni `DSP↔RCP` lo exponen — **bloquea comisionar el lazo de AFC contra hardware real** hasta confirmarlo con el proyecto DRx (ver `docs/algorithms/roadmap.md` "Decisiones cerradas" > "Lazo de AFC") |
+| `LAMULA_DSP_DRX_NCO_FS_HZ` / `LAMULA_DSP_DRX_NCO_WORD_BITS` | Reloj de referencia y anchura del acumulador de fase del NCO de recepción del DRx | Ni `DRx↔DSP` ni `DSP↔RCP` lo exponen — **bloquea comisionar el lazo de AFC contra hardware real** hasta confirmarlo con el proyecto DRx; la palabra es **absoluta** (15 MHz a 62,5 MHz y 32 bits = 1030792151) y el servicio envía `rx_if − freq` (ver `docs/algorithms/roadmap.md` "Decisiones cerradas" > "Lazo de AFC") |
+| `LAMULA_DSP_FAST_TIME_DILATION` | Factor de dilatación temporal del banco (opcional, 1.0 por defecto; 4.0 para la ZedBoard frente a la ZU9) | Sólo aplica al banco de pruebas: escala el periodo de muestreo del burst que usa el lazo de AFC |
 | `LAMULA_DSP_AFC_TAU_S` / `LAMULA_DSP_AFC_AMP_THRESHOLD` | Constante de tiempo y umbral de amplitud del lazo de AFC | Parámetros de instalación del propio lazo, no documentados en ningún contrato |
 
 ## Lo que sigue pendiente

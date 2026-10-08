@@ -53,6 +53,10 @@ pub struct ServiceConfig {
     pub rx_if_hz: f64,
     pub afc_tau_s: f64,
     pub afc_amp_threshold: f64,
+    /// Factor de dilatación del tiempo rápido respecto al hardware nominal
+    /// (ZedBoard = 4.0: celda de 416 ciclos a 62.5 MHz = 6.66 us frente a
+    /// 1.67 us de la ZU9). Opcional; 1.0 si no se define.
+    pub fast_time_dilation: f64,
     /// Si la fuente de datos de este despliegue es un simulador y no el DRx
     /// real. Se estampa en la cabecera de cada mensaje `up`
     /// (`header_flag::SIMULATED_SOURCE`) para que el RCP no archive dato
@@ -85,6 +89,10 @@ impl ServiceConfig {
             rx_if_hz: parse_required("LAMULA_DSP_RX_IF_HZ")?,
             afc_tau_s: parse_required("LAMULA_DSP_AFC_TAU_S")?,
             afc_amp_threshold: parse_required("LAMULA_DSP_AFC_AMP_THRESHOLD")?,
+            fast_time_dilation: match env::var("LAMULA_DSP_FAST_TIME_DILATION") {
+                Ok(_) => parse_required("LAMULA_DSP_FAST_TIME_DILATION")?,
+                Err(_) => 1.0,
+            },
             simulated_source: parse_bool_required("LAMULA_DSP_SIMULATED_SOURCE")?,
         })
     }

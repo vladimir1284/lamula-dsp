@@ -83,7 +83,7 @@ pub fn pack_rays(
             buf.push(VERSION_MINOR);
             buf.push(MsgType::Ray as u8);
             buf.push(0); // flags, reservado en v0.1
-            buf.extend_from_slice(&(payload_len as u32).to_le_bytes());
+            buf.extend_from_slice(&((RAY_SIZE + payload_len) as u32).to_le_bytes());
 
             // Ray (36 bytes, little-endian, mismo orden de campos que el struct).
             buf.extend_from_slice(&fields.seq_start.wrapping_add(i as u32).to_le_bytes());

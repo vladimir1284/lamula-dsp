@@ -227,7 +227,9 @@ pub fn decode_ray_frame(
         return Err(IngestError::UnexpectedMsgType(msg_type));
     }
     let payload_len = u32::from_le_bytes(frame[8..12].try_into().unwrap()) as usize;
-    if frame.len() != HEADER_SIZE + RAY_SIZE + payload_len {
+    // `payload_len` cuenta lo que sigue a la cabecera de 12 B: el struct `ray`
+    // de `RAY_SIZE` más la carga de I/Q (esquema, doc de `header.payload_len`).
+    if frame.len() != HEADER_SIZE + payload_len || payload_len < RAY_SIZE {
         return Err(IngestError::Truncated);
     }
 
@@ -247,7 +249,7 @@ pub fn decode_ray_frame(
     let ray_flags = ray[35];
 
     let expected_payload_len = bins * n_channels * 2 * std::mem::size_of::<i16>();
-    if payload_len != expected_payload_len {
+    if payload_len != RAY_SIZE + expected_payload_len {
         return Err(IngestError::Truncated);
     }
 

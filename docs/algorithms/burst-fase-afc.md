@@ -51,6 +51,18 @@ convierte en una nueva palabra de fase para el NCO del DRx. El contrato
 que el proyecto DRx documenta como D-02: en Hz haría falta que el DSP conociera
 la frecuencia de muestreo del DRx, y eso acopla las dos plataformas.
 
+**Medida en lazo cerrado.** El burst de cada rayo llega por el mismo DDC que
+ya lleva aplicada la corrección, así que la frecuencia que se mide es el
+*residuo* `d − x`, no el desvío absoluto `d`. Filtrar el residuo como si fuera
+absoluto deja el punto fijo en `x = d/2`; el lazo suma antes la corrección ya
+aplicada (`AfcLoop::update_residual`) y filtra la frecuencia absoluta, con punto
+fijo en `d`. `AfcLoop::update` queda para medidas en lazo abierto. La amplitud
+del burst se mide de forma no coherente (media de módulos): la media compleja se
+anula en un burst desplazado de la IF y congelaría el lazo justo cuando hay que
+corregir. El mezclador del DDC es conjugado (subir la palabra del NCO sube el
+pico), por eso el servicio envía `rx_if − freq`. Rango de captura del estimador:
+±0,5 ciclos/muestra del burst.
+
 El lazo necesita las salvaguardas habituales de cualquier lazo cerrado que
 gobierna hardware: límite de excursión máxima respecto de la nominal, límite de
 velocidad de cambio por actualización, y detección de pérdida de burst —si el

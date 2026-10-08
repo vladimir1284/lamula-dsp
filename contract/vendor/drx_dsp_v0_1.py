@@ -1,6 +1,6 @@
 """GENERADO por tools/gen_contract.py a partir de contract/schema/drx_dsp_v0_1.toml. NO EDITAR A MANO.
 
-Contrato DRx↔DSP v0.6 — referencia
+Contrato DRx↔DSP v0.8 — referencia
 de los tests de contrato. Es la tercera implementación generada de la misma
 fuente: si esta y la de C no producen los mismos bytes, el codegen está mal.
 """
@@ -12,7 +12,8 @@ from dataclasses import dataclass
 
 MAGIC = 0x4C4D4452
 VERSION_MAJOR = 0
-VERSION_MINOR = 6
+VERSION_MINOR = 8
+TCP_PORT = 9470
 
 @dataclass
 class Header:
@@ -213,6 +214,7 @@ class Error:
     NOT_CONFIGURED = 9
     VECTOR_UNKNOWN = 10
     UNIMPLEMENTED = 11
+    AFC_OUT_OF_RANGE = 12
 
 class Channel:
     """Bit por canal físico presente en channel_mask. El orden de channels[] en el payload de ray sigue el orden ascendente de los bits puestos en channel_mask; cada canal aporta los mismos `bins` que el resto del rayo. rx_0..rx_3 son 2 conversores por polarización (H, V): uno a ganancia nominal y otro con la señal atenuada, para extender el rango dinámico (confirmado en sesión, 8-sep-2026). El emparejamiento H/V de arriba está confirmado; el orden concreto rx_0 vs rx_1 (¿cuál es el nominal y cuál el atenuado de cada polarización?) es una CONVENCIÓN asumida aquí, sin confirmar todavía contra el cableado físico — ver docs/alcance/pendientes.md, A10."""
